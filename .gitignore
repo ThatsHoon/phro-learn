@@ -1,0 +1,7 @@
+.claude-plugin/types/
+tsconfig.json
+node_modules/
+__pycache__/
+docs/
+queue/
+.claude/
