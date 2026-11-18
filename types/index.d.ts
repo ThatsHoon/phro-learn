@@ -1,5 +1,5 @@
 /** Which tab a term sits in: to learn, archived, or removed. Removed terms stay for dedup. */
-export type Status = 'todo' | 'done' | 'removed'
+export type Status = 'todo' | 'review' | 'done' | 'removed'
 
 /** What a term names; the pane labels it. */
 export type Kind = 'concept' | 'method' | 'metric' | 'model' | 'tool' | 'standard' | 'org'
@@ -21,6 +21,10 @@ export type Term = {
   id?: string
   /** cloud mode: the tab was changed here and the server has not been told yet */
   push?: boolean
+  /** cloud mode: the server's change number of the tab, sent back with a change so an older view loses */
+  ver?: number
+  /** cloud mode: the server is still judging this uploaded term; its tab is sent once it is judged */
+  pending?: true
 }
 
 /** A candidate waiting to be judged with others, so the prompt is paid once per batch. */
@@ -31,6 +35,8 @@ export type Pending = {
   context: string
   /** ISO time it was queued */
   seen: string
+  /** a local term the member chose to upload: it goes out although a term of its key is already here */
+  up?: true
 }
 
 /** ~/.claude/phro-learning/terms.json */
@@ -43,6 +49,10 @@ export type TermsDb = {
   pending: Pending[]
   /** present while this PC is connected to the service (cloud mode) */
   cloud?: Cloud
+  /** the account the terms with an id belong to; kept after logout, so another account's login starts clean */
+  account?: string
+  /** the account for which the member answered whether to upload this PC's local terms */
+  uploadAsked?: string
 }
 
 /** What the pane's head line shows in cloud mode, and where the glossary sync stands. */
@@ -57,6 +67,8 @@ export type Cloud = {
   at?: string
   /** why sending is on hold (plan limit, outdated client); cleared by the next sync */
   notice?: string
+  /** how many more terms the plan holds; absent = no cap */
+  room?: number
 }
 
 /** One term as GET /v1/me/terms gives it. */
@@ -69,6 +81,7 @@ export type Remote = {
   kind?: string | null
   meaning: string
   example: string
+  ver?: number
 }
 
 /** The refresh token of this PC's connection, kept in $.store under "auth". An empty token = signed out, log in again. */

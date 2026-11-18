@@ -1,8 +1,8 @@
 {
   "name": "phro-learn",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "license": "MIT",
-  "description": "Collect the AI and IT terms you meet while working with Claude: phro-learn picks them from Claude's answers into a desktop pane with a short meaning, its kind and the sentence it was met in, judging new candidates in batches to spend few tokens, or, once connected with /phro-learn login, sending only the candidate words to the phrolearn.com service, which judges them with no model call on your side.",
+  "description": "Collect the AI and IT terms you meet while working with Claude: phro-learn picks them from Claude's answers into a desktop pane with a short meaning, its kind and the sentence it was met in, judging new candidates in batches to spend few tokens, or, once connected with /phro-learn login, sending only the candidate words to the workphro service, which judges them with no model call on your side.",
   "author": {
     "name": "thatshoon"
   },
@@ -11,9 +11,9 @@
     "language": {
       "type": "string",
       "title": "Language of your terms",
-      "description": "The language your terms are collected and explained in on phrolearn.com (ko, en, ja, de, es, fr, pt). \"account\" keeps the language your phrolearn.com account already has.",
+      "description": "The language your terms are collected and explained in on workphro (ko, en, ja, de, es, fr, pt, it, id). \"account\" keeps the language your workphro account already has.",
       "default": "account",
-      "options": ["account", "ko", "en", "ja", "de", "es", "fr", "pt"]
+      "options": ["account", "ko", "en", "ja", "de", "es", "fr", "pt", "it", "id"]
     }
   }
 }

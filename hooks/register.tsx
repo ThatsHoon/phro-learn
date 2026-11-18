@@ -1,6 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register } from 'claude-code'
 
+import { TEXT } from './text'
 import type { Auth, CallLog, Cloud, Kind, Order, Pending, Remote, Status, Term, TermsDb, Usage } from '../types'
 
 const PANE = 'phro-learn'
@@ -31,22 +32,28 @@ const MAX_SCAN_BATCHES = 5
 const MAX_LOG = 200
 const CONTEXT_CHARS = 120
 // stamped on each new term as `v`, so terms from different prompts can be told apart when judging quality
-const PROMPT_VERSION = 2
+const PROMPT_VERSION = 3
 // Rows drawn at once. Every redraw rebuilds the whole tree; with 164 removed terms a burst of
 // tab presses queued redraws of ~650 elements each and the pane stopped answering.
 const PAGE = 30
 
-// Cloud mode (0.12): connected to the phrolearn.com service, this plugin calls no model. It sends
+// Cloud mode (0.12): connected to the workphro service, this plugin calls no model. It sends
 // candidate words only and receives the glossary back. Never the answer text,
 // a sentence, a path, the project's name or the session.
-const CLIENT_VERSION = '0.13.0'
-// ponytail: the local development server; becomes the service's address once it is hosted
-const DEFAULT_SERVER = 'http://localhost:8000'
+// The server turns away a client older than its minimum, so this is the manifest's own version, read once.
+let clientVersion: Promise<string> | undefined
+const version = ($: EngineInterface) => clientVersion ??=
+  $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).then(s => String(JSON.parse(s).version), () => '0')
+// the hosted service; `/phro-learn login http://localhost:8000` reaches a local development server
+const DEFAULT_SERVER = 'https://work.phro.net'
 // One session per PC (the lead) talks to the server, so several open sessions cost one session's requests
 // and never spend the same refresh token twice. Others only queue candidates and read terms.json.
 const TICK_MS = 20_000
 const LEAD_MS = 90_000
 const SYNC_MS = 5 * 60_000
+// connected: candidates go out once this many wait or the oldest has waited this long, not on every answer
+export const SEND_MIN = 10
+export const SEND_WAIT_MS = 2 * 60_000
 const MAX_RETRY_MS = 5 * 60_000
 
 const STOPWORDS = new Set(
@@ -55,66 +62,39 @@ const STOPWORDS = new Set(
 
 const KINDS: readonly Kind[] = ['concept', 'method', 'metric', 'model', 'tool', 'standard', 'org']
 
-// The text a member reads. Korean is built in: it is what local mode shows, and what a connected PC shows
-// until its first sync. Connected, the service sends the member's language with the catalog names
-// (GET /client/names) and that replaces this table.
-const KO: Record<string, string> = {
-  kind_concept: "개념",
-  kind_method: "기법",
-  kind_metric: "지표",
-  kind_model: "모델",
-  kind_tool: "도구",
-  kind_standard: "표준",
-  kind_org: "조직",
-  judged: "📘 후보 {asked}개 판정, 용어 {added}개 추가",
-  nothing_to_judge: "판정할 후보가 없습니다.",
-  open_on_web: "웹에서 열기",
-  disconnected: "phro-learn: 연결이 끊겼습니다. /phro-learn login 으로 다시 연결하세요.",
-  full: "용어집이 가득 찼습니다 (요금제 한도). 새 후보는 이 PC에만 쌓입니다.",
-  update_needed: "phro-learn 업데이트가 필요합니다: claude plugin update phro-learn@phro",
-  code_expired: "phro-learn: 연결 코드가 만료됐습니다. /phro-learn login 을 다시 실행하세요.",
-  connect_failed: "phro-learn: 연결하지 못했습니다. 다시 시도하세요.",
-  connected: "📘 phro-learn 연결됨 — 이제 용어 판정은 서비스가 합니다.",
-  code: "phro-learn 연결 코드: {code}",
-  file_error: "phro-learn: {path} 를 읽거나 쓰지 못했습니다 ({err})",
-  order_time: "시간순(최신 먼저)",
-  order_abc: "abc순",
-  order_local: "가나다순",
-  tab_todo: "배울 용어",
-  tab_done: "보관",
-  tab_removed: "제거",
-  empty_todo: "아직 용어가 없습니다. /phro-learn scan 으로 이 세션을 훑어보세요.",
-  empty_done: "보관한 용어가 없습니다.",
-  empty_removed: "제거한 용어가 없습니다. 제거한 용어는 다시 추가되지 않습니다.",
-  added: "📘 용어 {n}개 추가 — /phro-learn",
-  search: "검색",
-  search_ph: "용어, 뜻, 예시, 현지 이름",
-  find: "찾기",
-  sort: "정렬",
-  clear_search: "검색 지우기",
-  connecting: "연결 중",
-  unlock_left: "오늘 열기 {n}개 남음",
-  sending: "전송 대기 {n}개",
-  judge_waiting: "판정 대기 {n}개 (40개가 차거나 하루가 지나면 판정)",
-  judge_now: "지금 판정",
-  results: "\"{q}\" 검색 결과 {n}개",
-  no_match: "검색과 맞는 용어가 없습니다.",
-  restore: "복원",
-  remove: "제거",
-  eg: "예)",
-  more: "더 보기 ({n}개 남음)",
-}
-let strings = KO
-let lang = 'ko'
+// The text a member reads, built in for every language the service has (text.ts is written from the service's
+// language files). Local mode shows the language chosen at install; a connected PC shows it until its first sync,
+// then the service sends the member's language with the catalog names (GET /client/names) and that replaces it.
+let strings = TEXT.en!.strings
+let lang = 'en'
 // the language chosen when the plugin was installed (userConfig); 'account' leaves the account's language as it is
 let wantLang = 'account'
+
+/** The language local mode uses: the one chosen at install, else the system's when built in, else English. */
+export function localLang(want: string, system = Intl.DateTimeFormat().resolvedOptions().locale): string {
+  if (TEXT[want]) return want
+  const sys = system.split('-')[0]!.toLowerCase()
+  return TEXT[sys] ? sys : 'en'
+}
+
+/** Local mode's text: at load, and again at logout so the service's language does not linger. */
+function useLocal(): void {
+  lang = localLang(wantLang)
+  strings = TEXT[lang]!.strings
+}
+
 const tr = (key: string, vars: Record<string, unknown> = {}): string =>
-  (strings[key] ?? KO[key] ?? key).replace(/\{(\w+)\}/g, (_, n: string) => String(vars[n] ?? ''))
+  (strings[key] ?? TEXT[lang]?.strings[key] ?? TEXT.en!.strings[key] ?? key).replace(/\{(\w+)\}/g, (_, n: string) => String(vars[n] ?? ''))
 
 // Haiku sees only numbered unknown candidates, never the answer text or the known list.
 // Pipe lines instead of JSON: fewer output tokens, and one bad line costs one term.
 // The example is the answer sentence the term came from, kept locally, so Haiku writes none.
-const SYSTEM = `You curate a glossary of AI and IT knowledge for a learner who works with engineers.
+// The aliases and the meaning are written in the language local mode shows (localLang).
+// ponytail: 50 characters is the Korean and Japanese length; other languages get 100, as their words are longer
+export const system = (code: string): string => {
+  const language = TEXT[code]?.language ?? 'English'
+  const chars = code === 'ko' || code === 'ja' ? 50 : 100
+  return `You curate a glossary of AI and IT knowledge for a learner who works with engineers.
 Input: numbered candidate words taken from an AI coding assistant's answers, one per line.
 Rules:
 - Keep terms worth learning across AI and IT: AI/ML concepts and methods (e.g. LoRA, RAG, quantization, beam search), metrics, model types, data and infra, networking, security, dev-process jargon, protocols and standards, and widely used technologies, frameworks and services (e.g. Kubernetes, MLflow, CUDA).
@@ -127,17 +107,20 @@ Format, one term per line:
 numbers | term | kind | aliases | meaning
 - numbers: the candidate numbers the term covers, comma-separated, e.g. 3,7
 - kind: one of ${KINDS.join(', ')}
-- aliases: separated by ; - the full name, the Korean name Korean engineers use (e.g. 양자화), spelling variants; may be empty
-- meaning: Korean, at most 50 characters: what it is and what it is for, in words a non-engineer understands. Never define a term by its own name or full name.
+- aliases: separated by ; - the full name, the ${language} name ${language}-speaking engineers use when it differs from the term, spelling variants; may be empty
+- meaning: ${language}, at most ${chars} characters: what it is and what it is for, in words a non-engineer understands. Never define a term by its own name or full name.
 If none qualify, output a single line: -`
+}
 
-/** The dedup key: case, spaces, punctuation and a parenthesized note never make a term new. */
+/** The dedup key: case, spaces, punctuation, a parenthesized note, ß/ss and a word-final ー never make a term new. */
 export function normalize(s: string): string {
   return s
     .normalize('NFKC') // full-width and half-width forms are one term
     .toLowerCase()
+    .replaceAll('ß', 'ss')
     .replace(/\([^)]*\)/g, '')
-    .replace(/[\s\-_./·:'"`]/g, '')
+    .replace(/ー+(?=[\s\-_./·・:'"`]|$)/g, '') // サーバー and サーバ are one word
+    .replace(/[\s\-_./·・:'"`]/g, '')
 }
 
 export function emptyDb(): TermsDb {
@@ -172,6 +155,11 @@ export function prose(text: string): string {
 // a ".ext" is part of an identifier (repo/name, --flag, file.ts, 27ea05f) and is skipped.
 const ACRONYM = /(?<![\w/@$.-])[A-Z][A-Z0-9]{1,5}(?:\/[A-Z]{1,5})?(?=s?(?![\w/@(]|\.\w))/g
 const ENGLISH_RUN = /(?<![\w/@$.-])[A-Za-z][A-Za-z0-9+#]*(?:[ -][A-Za-z][A-Za-z0-9+#]*){0,2}(?![\w/@(]|\.\w)/g
+// A name with a capital inside (LoRA, PyTorch, OAuth, MLflow): in any language's prose it is a name, not a plain word.
+const MIXED_CASE = /(?<![\w/@$.-])(?=[A-Za-z0-9+#]*(?:[a-z][A-Z]|[A-Z]{2}[a-z]))[A-Za-z][A-Za-z0-9+#]*(?![\w/@(]|\.\w)/g
+// What the answer itself marks in bold (**tasa de conversión**), up to four words; a bold label ("**Note:**") is not one.
+const BOLD = /\*\*([^*\n]{2,40}?)\*\*(?!:)/g
+const isBoldName = (s: string) => !/[:.!?。,]$/.test(s.trim()) && s.trim().split(/\s+/).length <= 4
 
 /** A commit hash or similar id: hex only, with a digit. */
 function isIdLike(word: string): boolean {
@@ -194,15 +182,19 @@ function hasName(body: string, name: string): boolean {
   return false
 }
 
-// ponytail: regex candidates catch acronyms, and English runs inside Korean, Japanese or Chinese prose. A concept
-// written in the member's own language (멱등성, tasa de conversión) is caught only when its name is in `names`,
-// the names the service sends; a name not on that list is missed — add a noun pass per
-// language if that matters
+// ponytail: regex candidates catch acronyms and mixed-case names in any language, every English run inside Korean,
+// Japanese or Chinese prose, and bold words in other prose. A plain word in Latin-script prose (quantization, tasa de conversión)
+// is caught only when it is bold or in `names`, the names the service sends; others are missed — add a noun pass
+// per language if that matters
 export function candidates(text: string, db: TermsDb, names: readonly string[] = []): string[] {
   const body = prose(text)
   const found = [...body.matchAll(ACRONYM)].map(m => m[0])
   const local = (body.match(/[가-힣ぁ-ヿ一-鿿]/g) ?? []).length
-  if (local > body.length * 0.15) found.push(...[...body.matchAll(ENGLISH_RUN)].map(m => m[0]))
+  const isCjk = local > body.length * 0.15
+  if (isCjk) found.push(...[...body.matchAll(ENGLISH_RUN)].map(m => m[0]))
+  found.push(...[...body.matchAll(MIXED_CASE)].map(m => m[0]))
+  // Korean and Japanese answers bold their headings and labels; their terms already come from the English runs
+  if (!isCjk) found.push(...[...body.matchAll(BOLD)].map(m => m[1]!).filter(isBoldName))
   // ponytail: one scan of the answer per name; build one matcher for the list when it passes tens of thousands
   found.push(...names.filter(name => hasName(body, name)))
 
@@ -241,16 +233,16 @@ export function enqueue(db: TermsDb, text: string, now: string, skip?: (word: st
   return fresh.length ? { ...db, pending: [...db.pending, ...fresh] } : db
 }
 
-/** A full batch is waiting, or the oldest candidate has waited a day. */
-export function due(db: TermsDb, nowMs: number): boolean {
+/** A full batch is waiting, or the oldest candidate has waited long enough (a day for the local judge). */
+export function due(db: TermsDb, nowMs: number, min = BATCH, waitMs = MAX_WAIT_MS): boolean {
   const oldest = db.pending[0]
-  return db.pending.length >= BATCH || (oldest !== undefined && nowMs - Date.parse(oldest.seen) >= MAX_WAIT_MS)
+  return db.pending.length >= min || (oldest !== undefined && nowMs - Date.parse(oldest.seen) >= waitMs)
 }
 
-/** A batch that was claimed but not judged goes back to the front of the queue. */
+/** A batch that was claimed but not judged goes back to the front of the queue; an upload goes back although its term is here. */
 export function putBack(db: TermsDb, batch: readonly Pending[]): TermsDb {
   const known = seenKeys(db)
-  return { ...db, pending: [...batch.filter(p => !known.has(p.key)), ...db.pending] }
+  return { ...db, pending: [...batch.filter(p => p.up || !known.has(p.key)), ...db.pending] }
 }
 
 export type Parsed = { picks: number[]; term: string; kind?: Kind; aliases: string[]; meaning: string }
@@ -311,7 +303,7 @@ export function merge(db: TermsDb, asked: readonly Pending[], parsed: readonly P
   const known = new Set([...seen, ...claimed, ...rejected])
   return {
     db: {
-      version: 1,
+      ...db,
       terms: [...fresh, ...db.terms],
       ignored: [...db.ignored, ...rejected].slice(-MAX_IGNORED),
       pending: db.pending.filter(p => !known.has(p.key)),
@@ -365,12 +357,28 @@ async function dbPath($: EngineInterface): Promise<string> {
 /** Older files carried `isDone` instead of `status`, and no queue. */
 type StoredTerm = Omit<Term, 'status'> & { status?: Status; isDone?: boolean }
 
-export function migrate(raw: { terms?: StoredTerm[]; ignored?: string[]; pending?: Pending[]; cloud?: Cloud }): TermsDb {
-  const terms = (raw.terms ?? []).map(({ isDone, status, ...t }): Term => ({
-    ...t,
-    status: status ?? (isDone ? 'done' : 'todo'),
-  }))
-  return { version: 1, terms, ignored: raw.ignored ?? [], pending: raw.pending ?? [], ...(raw.cloud ? { cloud: raw.cloud } : {}) }
+export function migrate(raw: { terms?: StoredTerm[]; ignored?: string[]; pending?: Pending[]; cloud?: Cloud; account?: string; uploadAsked?: string }): TermsDb {
+  // keys written under an older normalize() take the current one; the old keys stay as names, so nothing seen is new
+  const again = (keys: string[]) => [...new Set([...keys, ...keys.map(normalize)])]
+  const terms = (raw.terms ?? []).map(({ isDone, status, ...t }): Term => {
+    const key = normalize(t.key)
+    return {
+      ...t,
+      key,
+      aliases: again([...t.aliases, t.key]).filter(a => a !== key),
+      status: status ?? (isDone ? 'done' : 'todo'),
+    }
+  })
+  const pending = (raw.pending ?? []).map(p => ({ ...p, key: normalize(p.word) }))
+  return {
+    version: 1,
+    terms,
+    ignored: again(raw.ignored ?? []),
+    pending,
+    ...(raw.cloud ? { cloud: raw.cloud } : {}),
+    ...(raw.account ? { account: raw.account } : {}),
+    ...(raw.uploadAsked ? { uploadAsked: raw.uploadAsked } : {}),
+  }
 }
 
 const isFile = ($: EngineInterface, path: string) =>
@@ -383,13 +391,22 @@ const isFile = ($: EngineInterface, path: string) =>
 let waiting = 0
 // The connection as the file last had it: the pane's head line in cloud mode.
 let cloudInfo: Cloud | undefined
+// Cloud mode: how many local terms the pane asks to upload, and the keys of the terms only this PC has.
+let toAsk = 0
+let onlyHere = new Set<string>()
+
+function remember(db: TermsDb) {
+  waiting = db.pending.length
+  cloudInfo = db.cloud
+  toAsk = uploadAsk(db)
+  onlyHere = new Set(db.cloud ? localOnly(db).map(t => t.key) : [])
+}
 
 async function load($: EngineInterface): Promise<TermsDb> {
   const path = await dbPath($)
   // a corrupt file throws here, so nothing below ever overwrites it with an empty list
   const db = (await isFile($, path)) ? migrate(JSON.parse(await $.fs.read(path))) : emptyDb()
-  waiting = db.pending.length
-  cloudInfo = db.cloud
+  remember(db)
   return db
 }
 
@@ -420,8 +437,7 @@ async function show($: EngineInterface, list: Term[]) {
 
 async function save($: EngineInterface, db: TermsDb) {
   await $.fs.write(await dbPath($), JSON.stringify(db, null, 1) + '\n')
-  waiting = db.pending.length
-  cloudInfo = db.cloud
+  remember(db)
   lastMtime = await mtime($)
   await show($, db.terms)
 }
@@ -452,7 +468,7 @@ function collect($: EngineInterface, text: string): Promise<number> {
     const mask = (await auth($)) ? await masks($) : undefined
     if (mask?.isOff) return 0
     const db = await load($)
-    const next = enqueue(db, text, new Date().toISOString(), mask && (w => isSecretLike(w) || mask.keys.has(normalize(w))),
+    const next = enqueue(db, text, new Date(await $.clock.now()).toISOString(), mask && (w => isSecretLike(w) || mask.keys.has(normalize(w))),
       mask && (await catalogNames($)))
     if (next === db) return 0
     await save($, next)
@@ -470,7 +486,7 @@ async function judgeBatch($: EngineInterface, batch: Pending[]): Promise<number>
   try {
     r = await $.model.complete({
       model: 'haiku',
-      system: SYSTEM,
+      system: system(lang),
       prompt: batch.map((p, i) => `${i + 1}. ${p.word}`).join('\n'),
       maxTokens: MAX_REPLY_TOKENS,
       effort: 'low',
@@ -512,7 +528,7 @@ async function judge($: EngineInterface, all = false): Promise<{ asked: number; 
     for (let i = 0; i < MAX_SCAN_BATCHES; i++) {
       const batch = await serial(async () => {
         const db = await load($)
-        if (!(all ? db.pending.length > 0 : due(db, Date.now()))) return []
+        if (!(all ? db.pending.length > 0 : due(db, await $.clock.now()))) return []
         await save($, { ...db, pending: db.pending.slice(BATCH) })
         return db.pending.slice(0, BATCH)
       })
@@ -537,8 +553,10 @@ function judgeNow($: EngineInterface): Promise<void> {
 function setStatus($: EngineInterface, key: string, status: Status): Promise<void> {
   return serial(async () => {
     const db = await load($)
-    // a term the server knows is marked, and the lead session tells the server on its next tick
-    await save($, { ...db, terms: db.terms.map(t => (t.key === key ? { ...t, status, ...(t.id && db.cloud ? { push: true } : {}) } : t)) })
+    // a term the server knows is marked, and the lead session tells the server on its next tick;
+    // removing stays on this PC: the server keeps the term as it was
+    const isSent = (t: Term) => t.id && db.cloud && status !== 'removed'
+    await save($, { ...db, terms: db.terms.map(t => (t.key === key ? { ...(({ push, ...rest }) => rest)(t), status, ...(isSent(t) ? { push: true } : {}) } : t)) })
   })
 }
 
@@ -583,39 +601,91 @@ function masks($: EngineInterface) {
   })())
 }
 
-const STATUSES: readonly string[] = ['todo', 'done', 'removed']
+const STATUSES: readonly string[] = ['todo', 'review', 'done', 'removed']
 
-/** Puts the server's terms into the local copy: by id, else over a local term of the same key. Terms still being judged are skipped. */
-export function applyRemote(db: TermsDb, items: readonly Remote[]): TermsDb {
-  let terms = db.terms
+const RANK: Record<Status, number> = { todo: 0, review: 1, done: 2, removed: 3 }
+
+/**
+ * Puts the server's terms into the local copy: by id, else over a local term of the same key, and drops the rows
+ * the server deleted (`gone`). Terms still being judged are skipped.
+ * A tab change not yet sent wins over what the server has, and goes out with the change number it was made from.
+ * A term met for the first time (a local term of the same key, or an uploaded one) keeps the further of the two tabs.
+ * A removal never goes to the server, so it stays.
+ */
+export function applyRemote(db: TermsDb, items: readonly Remote[], gone: readonly string[] = []): TermsDb {
+  const dropped = new Set(gone)
+  let terms = dropped.size ? db.terms.filter(t => !t.id || !dropped.has(t.id)) : db.terms
   for (const r of items) {
-    if (r.pending) continue
+    if (r.pending || dropped.has(r.id)) continue
     let at = terms.findIndex(t => t.id === r.id)
     if (at < 0) at = terms.findIndex(t => !t.id && t.key === r.key)
     const old = terms[at]
+    const remote: Status = STATUSES.includes(r.status) ? (r.status as Status) : (old?.status ?? 'todo')
+    const isFirst = old && (!old.id || (old.push && old.ver === undefined))
+    const status: Status =
+      !old ? remote
+      : old.status === 'removed' ? 'removed'
+      : isFirst ? (RANK[old.status] > RANK[remote] ? old.status : remote)
+      : old.push ? old.status
+      : remote
+    const push = status !== 'removed' && status !== remote
+    const ver = push && old?.ver !== undefined ? old.ver : r.ver
     const term: Term = {
       key: r.key,
       term: r.term,
       aliases: old?.aliases ?? [],
       meaning: r.meaning,
       example: r.example,
-      // a tab change not yet sent wins over what the server still has
-      status: old?.push ? old.status : STATUSES.includes(r.status) ? (r.status as Status) : (old?.status ?? 'todo'),
+      status,
       ...((KINDS as readonly string[]).includes(r.kind ?? '') ? { kind: r.kind as Kind } : {}),
       id: r.id,
-      ...(old?.push ? { push: true } : {}),
+      ...(push ? { push: true } : {}),
+      ...(ver !== undefined ? { ver } : {}),
     }
     terms = at < 0 ? [term, ...terms] : terms.map((t, i) => (i === at ? term : t))
   }
   return { ...db, terms }
 }
 
+/** Terms judged on this PC that the server does not have: no id, not removed, not on their way up. */
+export function localOnly(db: TermsDb): Term[] {
+  const going = new Set(db.pending.filter(p => p.up).map(p => p.key))
+  return db.terms.filter(t => !t.id && t.status !== 'removed' && !going.has(t.key))
+}
+
+/** How many local terms the pane asks to upload: only while connected and not yet answered for this account. */
+export function uploadAsk(db: TermsDb): number {
+  return db.cloud && db.account && db.uploadAsked !== db.account ? localOnly(db).length : 0
+}
+
+// An e-mail, an IP address or a phone number is a person's, not a term
+const PERSONAL = /@|\b\d{1,3}(\.\d{1,3}){3}\b|\+?\d[\d ()-]{7,}\d/
+
+/**
+ * Queues this PC's local terms in front of the waiting candidates, through the same filters a candidate passes:
+ * learned first, then in review, then to learn, newest first in each, up to the plan's room. The local meaning
+ * and other names stay here; the service's text replaces them when the term comes back.
+ */
+export function upload(db: TermsDb, now: string, skip: (word: string) => boolean = () => false): { db: TermsDb; n: number } {
+  const order = (t: Term) => (t.status === 'done' ? 0 : t.status === 'review' ? 1 : 2)
+  const words = localOnly(db)
+    .sort((a, b) => order(a) - order(b)) // stable: newest first stays within each tab
+    .map(t => {
+      const short = t.term.length > 40 ? t.term.replace(/\([^)]*\)/g, '').trim() : t.term // the server takes 2 to 40 characters
+      return { word: short, key: t.key }
+    })
+    .filter(w => w.word.length >= 2 && w.word.length <= 40 && normalize(w.word) === w.key && !PERSONAL.test(w.word) && !isSecretLike(w.word) && !skip(w.word))
+    .slice(0, db.cloud?.room ?? Infinity)
+    .map((w): Pending => ({ ...w, context: '', seen: now, up: true }))
+  return { db: { ...db, pending: [...words, ...db.pending], ...(db.account ? { uploadAsked: db.account } : {}) }, n: words.length }
+}
+
 type Reply = { status: number; data: Record<string, any> }
 
-async function call($: EngineInterface, server: string, method: string, path: string, body?: unknown, token?: string): Promise<Reply> {
+async function call($: EngineInterface, server: string, method: string, path: string, body?: unknown, token?: string, extra: Record<string, string> = {}): Promise<Reply> {
   const r = await $.http.fetch(`${server}/v1${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', 'X-Client-Version': CLIENT_VERSION, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: { 'Content-Type': 'application/json', 'X-Client-Version': await version($), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
   let data = {}
@@ -631,7 +701,7 @@ async function call($: EngineInterface, server: string, method: string, path: st
 let access: { token: string; until: number } | undefined
 
 /** A request as this PC's connection; a rejected access token is renewed once. Undefined when signed out. */
-async function authed($: EngineInterface, method: string, path: string, body?: unknown): Promise<Reply | undefined> {
+async function authed($: EngineInterface, method: string, path: string, body?: unknown, extra?: Record<string, string>): Promise<Reply | undefined> {
   for (const isFirst of [true, false]) {
     const a = await auth($)
     if (!a?.refresh) return undefined
@@ -647,7 +717,7 @@ async function authed($: EngineInterface, method: string, path: string, body?: u
       await $.store.set('auth', { ...a, refresh: r.data.refresh_token })
       access = { token: r.data.access_token, until: Date.now() + (r.data.expires_in - 60) * 1000 }
     }
-    const r = await call($, a.server, method, path, body, access.token)
+    const r = await call($, a.server, method, path, body, access.token, extra)
     if (r.status !== 401 || !isFirst) return r
     access = undefined
   }
@@ -680,7 +750,7 @@ async function syncNames($: EngineInterface, etag: unknown): Promise<void> {
   const text = Object.entries((r.data.strings ?? {}) as Record<string, unknown>).filter((x): x is [string, string] => typeof x[1] === 'string')
   const names: Names = {
     etag: String(r.data.etag ?? etag),
-    lang: typeof r.data.lang === 'string' ? r.data.lang : 'ko',
+    lang: typeof r.data.lang === 'string' ? r.data.lang : lang,
     items: (r.data.items as unknown[]).filter((x): x is string => typeof x === 'string'),
     strings: Object.fromEntries(text),
   }
@@ -700,17 +770,40 @@ async function isLead($: EngineInterface, isForced = false): Promise<boolean> {
 
 let fails = 0
 let retryAt = 0
-// ticks left on which to fetch the glossary soon after a send
-let syncSoon = 0
+// one fetch of the glossary after a send: at once when the server already had terms (syncNow), and at the time
+// it gave for judging its new words (syncAt). ponytail: module variables, lost on reload; the pane's own sync
+// every SYNC_MS covers that
+let syncNow = false
+let syncAt = 0
 let lastSync = 0
 
+/** One key per batch: the same batch sent again after a lost reply gets the first reply back, ids included. */
+export async function batchKey(batch: readonly Pending[]): Promise<string> {
+  const text = batch.map(p => `${p.key}\t${p.seen}`).join('\n')
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))
+  return [...hash.slice(0, 16)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** Ties local terms to the rows the server gave for their keys; a row still being judged is marked, so its tab waits. */
+export function attachIds(db: TermsDb, ids: readonly { k: string; id: string; pending?: boolean }[]): TermsDb {
+  const byKey = new Map(ids.map(x => [x.k, x]))
+  return {
+    ...db,
+    terms: db.terms.map(t => {
+      const x = !t.id && byKey.get(t.key)
+      // the tab goes out once the row comes back through sync with its change number
+      return x ? { ...t, id: x.id, ...(x.pending ? { pending: true as const } : {}), ...(t.status !== 'todo' && t.status !== 'removed' ? { push: true } : {}) } : t
+    }),
+  }
+}
+
 /** Sends one batch of waiting candidates. It leaves the file first, so no session sends it twice, and goes back when the send fails. */
-// ponytail: no Idempotency-Key; a resend after a lost reply only counts a sighting twice
-async function flush($: EngineInterface): Promise<void> {
+async function flush($: EngineInterface, isForced = false): Promise<void> {
   if (Date.now() < retryAt) return
   const batch = await serial(async () => {
     const db = await load($)
     if (!db.cloud || db.cloud.notice || db.pending.length === 0) return []
+    if (!isForced && !due(db, await $.clock.now(), SEND_MIN, SEND_WAIT_MS)) return []
     await save($, { ...db, pending: db.pending.slice(BATCH) })
     return db.pending.slice(0, BATCH)
   })
@@ -722,7 +815,7 @@ async function flush($: EngineInterface): Promise<void> {
     })
   let r: Reply | undefined
   try {
-    r = await authed($, 'POST', '/ingest', { at: new Date().toISOString(), lang, items: batch.map(p => ({ t: p.word, n: 1 })) })
+    r = await authed($, 'POST', '/ingest', { at: new Date().toISOString(), lang, items: batch.map(p => ({ t: p.word, n: 1 })) }, { 'Idempotency-Key': await batchKey(batch) })
   } catch (err) {
     await hold()
     retryAt = Date.now() + Math.min(MAX_RETRY_MS, 1000 * 2 ** fails++)
@@ -731,11 +824,14 @@ async function flush($: EngineInterface): Promise<void> {
   if (r?.status === 200) {
     fails = 0
     // sent words are never sent again; the glossary comes back through sync
+    const ids = Array.isArray(r.data.ids) ? (r.data.ids as { k: string; id: string; pending?: boolean }[]) : []
     await serial(async () => {
       const db = await load($)
-      await save($, { ...db, ignored: [...db.ignored, ...batch.map(p => p.key)].slice(-MAX_IGNORED) })
+      await save($, attachIds({ ...db, ignored: [...db.ignored, ...batch.map(p => p.key)].slice(-MAX_IGNORED) }, ids))
     })
-    syncSoon = 3
+    // rows the server already had moved with this send, so the next sync brings them
+    if (r.data.known?.length || ids.some(x => !x.pending)) syncNow = true
+    if (r.data.queued) syncAt = Math.max(syncAt, (await $.clock.now()) + (Number(r.data.ready_in_ms) || SYNC_MS))
     return
   }
   if (r?.status === 403 && r.data.type === 'plan_limit') return hold(tr('full'))
@@ -744,17 +840,29 @@ async function flush($: EngineInterface): Promise<void> {
   if (r) retryAt = Date.now() + Math.max(Number(r.data.retry_after_ms) || 0, Math.min(MAX_RETRY_MS, 1000 * 2 ** fails++))
 }
 
-/** Tells the server the tab changes made here. */
+/**
+ * Tells the server the tab changes made here, each with the change number it was made from. A term still being
+ * judged, or not yet seen through sync, waits. 409: another PC or the web changed it since; theirs stands.
+ */
 async function pushStatus($: EngineInterface): Promise<void> {
-  const dirty = (await serial(() => load($))).terms.filter(t => t.push && t.id)
+  const dirty = (await serial(() => load($))).terms.filter(t => t.push && t.id && !t.pending && t.ver !== undefined)
   for (const t of dirty) {
-    const r = await authed($, 'PATCH', `/me/terms/${t.id}`, { status: t.status })
-    // 404: the term is gone on the server; nothing left to tell
-    if (r?.status !== 200 && r?.status !== 404) return
+    const r = await authed($, 'PATCH', `/me/terms/${t.id}`, { status: t.status, ver: t.ver })
+    // 404: the term is gone on the server; the next sync drops it
+    if (r?.status !== 200 && r?.status !== 404 && r?.status !== 409) return
+    const ver = typeof r.data.ver === 'number' ? r.data.ver : undefined
+    const theirs = r.status === 409 && STATUSES.includes(r.data.current) ? (r.data.current as Status) : undefined
     await serial(async () => {
       const db = await load($)
-      // a tab changed again meanwhile keeps its mark and goes out on the next round
-      await save($, { ...db, terms: db.terms.map(x => (x.id === t.id && x.status === t.status ? (({ push, ...rest }) => rest)(x) : x)) })
+      const terms = db.terms.map(x => {
+        if (x.id !== t.id) return x
+        const { push, ver: _, ...rest } = x
+        const base = ver === undefined ? { ...rest, ...(x.ver !== undefined ? { ver: x.ver } : {}) } : { ...rest, ver }
+        // a tab changed again here meanwhile goes out on the next round, from the new number; a removal stays here
+        if (x.status !== t.status) return x.status === 'removed' ? base : { ...base, push: true }
+        return theirs ? { ...base, status: theirs } : base
+      })
+      await save($, { ...db, terms })
     })
   }
 }
@@ -763,28 +871,69 @@ async function pushStatus($: EngineInterface): Promise<void> {
 async function sync($: EngineInterface): Promise<number | undefined> {
   let boot = await authed($, 'GET', '/client/bootstrap')
   if (boot?.status !== 200) return undefined
-  // the account follows the language set here
-  if (wantLang !== 'account' && boot.data.locale !== wantLang) {
+  const account = typeof boot.data.account === 'string' ? boot.data.account : undefined
+  // the language chosen here goes to the account once after it changes; the last one changed, here or on the web, stands
+  const sent = (await $.store.get('langSent')) as { account?: string; lang: string } | undefined
+  if (wantLang !== 'account' && (sent?.account !== account || sent?.lang !== wantLang)) {
     const set = await authed($, 'PATCH', '/me/profile', { locale: wantLang })
-    if (set?.status === 200) boot = (await authed($, 'GET', '/client/bootstrap')) ?? boot
+    if (set?.status === 200) {
+      await $.store.set('langSent', { account, lang: wantLang })
+      boot = (await authed($, 'GET', '/client/bootstrap')) ?? boot
+    }
     if (boot.status !== 200) return undefined
   }
   await syncNames($, boot.data.names?.etag)
+  // A first sync (or another account, or a cursor the server no longer covers) fetches the whole glossary, and
+  // then drops the rows of the copy the server no longer has.
+  let seen: Set<string> | undefined
+  await serial(async () => {
+    const db = await load($)
+    if (!db.cloud || !account || db.account === account) return
+    seen = new Set()
+    const { cursor, ...cloud } = db.cloud
+    // another account's rows leave this PC; local terms and waiting candidates stay
+    const terms = db.account ? db.terms.filter(t => !t.id) : db.terms
+    await save($, { ...db, terms, cloud, account })
+    $.ui.invalidate('ui.render') // the upload question is for this account
+  })
+  const cap = boot.data.limits?.cloud_terms
   let changed = 0
+  let isDone = false
   for (let page = 0; page < 20; page++) {
     const cursor = (await serial(() => load($))).cloud?.cursor
+    if (!cursor) seen ??= new Set()
     const r = await authed($, 'GET', `/me/terms${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`)
-    if (r?.status !== 200) break
+    if (r?.status !== 200) {
+      isDone = r?.status === 304
+      break
+    }
     const items = (r.data.items ?? []) as Remote[]
+    const gone = (r.data.gone ?? []) as string[]
+    if (r.data.reset) seen = new Set()
+    for (const t of items) seen?.add(t.id)
     await serial(async () => {
       const db = await load($)
       if (!db.cloud) return
-      const cloud: Cloud = { server: db.cloud.server, plan: boot.data.plan, at: new Date().toISOString(), ...(r.data.next ? { cursor: r.data.next } : {}) }
+      const next = r.data.reset ? undefined : (r.data.next ?? cursor)
+      const cloud: Cloud = { server: db.cloud.server, plan: boot.data.plan, at: new Date().toISOString(), ...(next ? { cursor: next } : {}) }
       if (typeof boot.data.blur?.unlock_left === 'number') cloud.unlockLeft = boot.data.blur.unlock_left // absent: no daily cap
-      await save($, { ...applyRemote(db, items), cloud })
+      if (typeof cap === 'number') cloud.room = Math.max(0, cap - (Number(boot.data.used) || 0))
+      await save($, applyRemote({ ...db, cloud }, items, gone))
     })
-    changed += items.filter(t => !t.pending).length
-    if (items.length === 0) break
+    changed += items.filter(t => !t.pending).length + gone.length
+    if (items.length === 0 && !r.data.reset) {
+      isDone = true
+      break
+    }
+  }
+  if (isDone && seen) {
+    const kept = seen
+    await serial(async () => {
+      const db = await load($)
+      const terms = db.terms.filter(t => !t.id || kept.has(t.id))
+      changed += db.terms.length - terms.length
+      if (terms.length !== db.terms.length) await save($, { ...db, terms })
+    })
   }
   lastSync = Date.now()
   return changed
@@ -798,11 +947,15 @@ async function tick($: EngineInterface, isForced = false): Promise<number | unde
   if (!(await isLead($, isForced))) return undefined
   isTicking = true
   try {
-    await flush($)
+    await flush($, isForced)
     await pushStatus($)
-    if (!isForced && syncSoon <= 0 && !((await read($, isOpen)) && Date.now() - lastSync >= SYNC_MS)) return undefined
-    syncSoon--
+    const isJudged = syncAt > 0 && (await $.clock.now()) >= syncAt
+    if (!isForced && !syncNow && !isJudged && !((await read($, isOpen)) && Date.now() - lastSync >= SYNC_MS)) return undefined
     const changed = await sync($)
+    if (changed !== undefined) {
+      syncNow = false
+      if (isJudged) syncAt = 0
+    }
     if (changed) $.ui.invalidate('ui.render')
     return changed
   } finally {
@@ -814,7 +967,7 @@ async function tick($: EngineInterface, isForced = false): Promise<number | unde
 async function login($: EngineInterface, server: string): Promise<string> {
   if (!/^https:\/\/|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(server)) return 'The server address must be https (http only for localhost).'
   const name = (await $.env.get('COMPUTERNAME')) ?? (await $.env.get('HOSTNAME')) ?? 'Claude Code'
-  const r = await call($, server, 'POST', '/auth/device/code', { device_name: name.slice(0, 80), client_version: CLIENT_VERSION })
+  const r = await call($, server, 'POST', '/auth/device/code', { device_name: name.slice(0, 80), client_version: await version($) })
   if (r.status !== 200) return `Could not reach ${server} (${r.status}).`
   const wait = Math.max(1, Number(r.data.interval) || 5) * 1000
   const ask = (left: number): void => {
@@ -840,6 +993,24 @@ async function login($: EngineInterface, server: string): Promise<string> {
   return `Open ${r.data.verification_uri} and enter the code ${r.data.user_code} (valid ${Math.round((Number(r.data.expires_in) || 600) / 60)} minutes).`
 }
 
+/** The answer to the pane's upload question: queue this PC's local terms for the service, or keep them here. */
+async function answerUpload($: EngineInterface, isUp: boolean): Promise<void> {
+  const mask = isUp ? await masks($) : undefined
+  const n = await serial(async () => {
+    const db = await load($)
+    if (!db.account) return 0
+    if (!isUp || mask?.isOff) {
+      await save($, { ...db, uploadAsked: db.account })
+      return 0
+    }
+    const r = upload(db, new Date(await $.clock.now()).toISOString(), w => mask!.keys.has(normalize(w)))
+    await save($, r.db)
+    return r.n
+  })
+  if (isUp) $.ui.toast(tr('uploading', { n }))
+  $.ui.invalidate('ui.render')
+}
+
 /** Ends the connection: the server drops this PC's tokens, the queue is emptied, and judging goes back to this PC. */
 async function logout($: EngineInterface): Promise<string> {
   if (!(await auth($))) return 'Not connected.'
@@ -847,6 +1018,8 @@ async function logout($: EngineInterface): Promise<string> {
   await authed($, 'POST', '/auth/logout', {}).catch(() => undefined) // offline: the token still ends here, and expires there
   await $.store.delete('auth')
   access = undefined
+  catalog = undefined
+  useLocal()
   await serial(async () => {
     const { cloud, ...db } = await load($)
     await save($, { ...db, pending: [] })
@@ -911,9 +1084,11 @@ export function visible(list: readonly Term[], status: Status, q: string, by: Or
 const text = (v: unknown): string =>
   typeof v === 'string' ? v : typeof (v as { value?: unknown })?.value === 'string' ? (v as { value: string }).value : ''
 
-const TABS: { status: Status; label: string; empty: string }[] = [
-  { status: 'todo', label: 'tab_todo', empty: 'empty_todo' },
-  { status: 'done', label: 'tab_done', empty: 'empty_done' },
+// a check moves a term one tab on: to learn, then review, then learned; unchecking a learned term sends it back to review
+const TABS: { status: Status; label: string; empty: string; next?: Status }[] = [
+  { status: 'todo', label: 'tab_todo', empty: 'empty_todo', next: 'review' },
+  { status: 'review', label: 'tab_review', empty: 'empty_review', next: 'done' },
+  { status: 'done', label: 'tab_done', empty: 'empty_done', next: 'review' },
   { status: 'removed', label: 'tab_removed', empty: 'empty_removed' },
 ]
 
@@ -938,14 +1113,16 @@ function revive($: EngineInterface) {
 
 export const register: Register = (on, options) => {
   if (typeof options?.language === 'string') wantLang = options.language
+  useLocal()
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'phro-learn',
       description:
         'Open the AI/IT term board ("scan" queues and judges this session\'s terms, "judge" judges the waiting candidates now, ' +
         '"stats" shows Haiku token use, ' +
-        '"login" connects to the phrolearn.com service so it judges instead of Haiku, "logout", "status", "sync")',
-      argumentHint: '[scan|judge|stats|login|logout|status|sync]',
+        '"login" connects to the workphro service so it judges instead of Haiku, "logout", "status", "sync", ' +
+        '"upload" asks again whether to upload the terms judged on this PC)',
+      argumentHint: '[scan|judge|stats|login|logout|status|sync|upload]',
     })
     await refresh($).catch(err => reportFailure($, err))
     revive($)
@@ -968,6 +1145,20 @@ export const register: Register = (on, options) => {
     if (arg === 'login' || arg.startsWith('login ')) return { text: await login($, (arg.slice(5).trim() || DEFAULT_SERVER).replace(/\/+$/, '')) }
     if (arg === 'logout') return { text: await logout($) }
     if (arg === 'status') return { text: await status($) }
+    if (arg === 'upload') {
+      if (!(await auth($))?.refresh) return { text: 'Not connected. Run "/phro-learn login".' }
+      const n = await serial(async () => {
+        const db = await load($)
+        const { uploadAsked, ...rest } = db
+        await save($, rest)
+        return uploadAsk(rest)
+      })
+      revive($)
+      await $.ui.open({ id: PANE, title: 'phro-learn' })
+      await update($, isOpen, () => true)
+      $.ui.invalidate('ui.render')
+      return { text: n ? `${n} local terms are on this PC only: the pane asks whether to upload them.` : 'No local terms to upload (or the first sync has not run yet).' }
+    }
     if (arg === 'sync') {
       if (!(await auth($))?.refresh) return { text: 'Not connected. Run "/phro-learn login".' }
       const changed = await tick($, true)
@@ -1034,14 +1225,18 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         <Box>
-          {TABS.map(t => (
-            <Button
-              key={`tab-${t.status}`}
-              label={`${tr(t.label)} (${list.filter(x => x.status === t.status).length})`}
-              variant={t.status === current ? 'primary' : 'secondary'}
-              onPress={() => (t.status === current ? undefined : fresh(() => update($, tab, () => t.status)))}
-            />
-          ))}
+          {TABS.map(t => {
+            const button = (
+              <Button
+                key={`tab-${t.status}`}
+                label={`${tr(t.label)} (${list.filter(x => x.status === t.status).length})`}
+                variant={t.status === current ? 'primary' : 'secondary'}
+                onPress={() => (t.status === current ? undefined : fresh(() => update($, tab, () => t.status)))}
+              />
+            )
+            // the removed tab sits on red, apart from the three study tabs
+            return t.status === 'removed' ? <Box key="tab-removed-bg" backgroundColor="error">{button}</Box> : button
+          })}
         </Box>
         <Box>
           <Input key="search" label={tr('search')} placeholder={tr('search_ph')} value={q} submitLabel={tr('find')} onInput={search} onSubmit={search} />
@@ -1061,6 +1256,16 @@ export const register: Register = (on, options) => {
           </Box>
         )}
         {cloudInfo?.notice && <Text dimColor>{cloudInfo.notice}</Text>}
+        {toAsk > 0 && (
+          <Box>
+            <Text>
+              {tr('upload_ask', { n: toAsk })}
+              {cloudInfo?.room === undefined ? '' : tr('upload_room', { n: cloudInfo.room })}{' '}
+            </Text>
+            <Button key="upload" label={tr('upload')} variant="primary" onPress={() => answerUpload($, true).catch(err => reportFailure($, err))} />
+            <Button key="upload-keep" label={tr('upload_keep')} onPress={() => answerUpload($, false).catch(err => reportFailure($, err))} />
+          </Box>
+        )}
         {waiting > 0 && !cloudInfo && (
           <Box>
             <Text dimColor>{tr('judge_waiting', { n: waiting })} </Text>
@@ -1075,12 +1280,13 @@ export const register: Register = (on, options) => {
               {current === 'removed' ? (
                 <Text bold>✕ {t.term} </Text>
               ) : (
-                <Button key={`check-${t.key}`} plain onPress={move(t.key, current === 'todo' ? 'done' : 'todo')}>
+                <Button key={`check-${t.key}`} plain onPress={move(t.key, TABS.find(x => x.status === current)!.next!)}>
                   {current === 'done' ? '☑ ' : '☐ '}
                   <Text bold>{t.term}</Text>
                 </Button>
               )}
               {t.kind && <Text dimColor> {tr(`kind_${t.kind}`)} </Text>}
+              {onlyHere.has(t.key) && <Text dimColor> {tr('only_here')} </Text>}
               {current === 'removed' ? (
                 <Button key={`restore-${t.key}`} label={tr('restore')} onPress={move(t.key, 'todo')} />
               ) : (

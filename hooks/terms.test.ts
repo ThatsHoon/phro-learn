@@ -9,6 +9,7 @@ import {
   enqueue,
   formatUsage,
   initials,
+  localLang,
   logCall,
   merge,
   migrate,
@@ -17,6 +18,7 @@ import {
   putBack,
   sameTerms,
   sentenceOf,
+  system,
   visible,
 } from './register'
 import type { Parsed } from './register'
@@ -63,7 +65,7 @@ test('merge takes the example from the picked sentence, and every picked number 
   const asked = [{ ...ask('k8s')[0]!, context: 'k8s 로 서버를 늘립니다.' }, ...ask('Kubernetes', 'xyz')]
   const r = merge(emptyDb(), asked, [p('Kubernetes', { picks: [1, 2], kind: 'tool', meaning: '컨테이너를 여러 서버에 배치·관리하는 도구' })])
   const t = r.db.terms[0]!
-  expect([t.key, t.example, t.kind, t.v]).toEqual(['kubernetes', 'k8s 로 서버를 늘립니다.', 'tool', 2])
+  expect([t.key, t.example, t.kind, t.v]).toEqual(['kubernetes', 'k8s 로 서버를 늘립니다.', 'tool', 3])
   expect(r.db.ignored).toEqual(['xyz'])
   // no numbers in the reply: the candidate with the same name gives the sentence
   const named = merge(emptyDb(), [{ ...ask('RAG')[0]!, context: 'RAG 로 찾습니다.' }], [p('RAG(Retrieval-Augmented Generation)')])
@@ -115,6 +117,14 @@ test('candidates skip code, URLs, paths, ids and identifier fragments', async ()
     '```',
   ].join('\n')
   expect(candidates(text, emptyDb())).toEqual(['CI/CD', 'push', 'OAuth'])
+})
+
+test('Latin-script prose gives mixed-case names and bold words, not every word', async () => {
+  const en = 'We fine-tune with LoRA on PyTorch, sign in with OAuth and track runs in **MLflow**. **Note:** the **learning rate** matters.'
+  expect(candidates(en, emptyDb())).toEqual(['LoRA', 'PyTorch', 'OAuth', 'MLflow', 'learning rate'])
+  expect(candidates('La **tasa de conversión** bajó y **esto es una frase larga entera**.', emptyDb())).toEqual(['tasa de conversión'])
+  expect(candidates('Edit `useState` in src/App.tsx and ThatsHoon/phro, then run it.', emptyDb())).toEqual([])
+  expect(candidates('**남은 일** 은 없습니다. **양자화** 로 PyTorch 모델을 줄입니다.', emptyDb())).toEqual(['PyTorch'])
 })
 
 test('usage adds up across calls, and the call log shows where the tokens went', async () => {
@@ -179,6 +189,14 @@ test('what Haiku is sent does not grow with the glossary', async () => {
   for (let i = 0; i < 300; i++) db = merge(db, [], [p(`Term ${i} word`)]).db
   const words = Array.from({ length: 60 }, (_, i) => 'Q' + String.fromCharCode(65 + (i % 26)) + String.fromCharCode(65 + Math.floor(i / 26)))
   expect(candidates('새 답변입니다 ' + words.join(' ') + ' 끝', db).length).toBe(40)
+})
+
+test('local mode follows the install language, else the system language it has, else English', async () => {
+  expect(localLang('ja', 'ko-KR')).toBe('ja')
+  expect(localLang('account', 'pt-BR')).toBe('pt')
+  expect(localLang('account', 'zh-CN')).toBe('en')
+  expect(system('es')).toContain('meaning: Spanish, at most 100 characters')
+  expect(system('ko')).toContain('meaning: Korean, at most 50 characters')
 })
 
 test('search matches term, meaning, example and other names; order sorts by time, abc or 가나다', async () => {
