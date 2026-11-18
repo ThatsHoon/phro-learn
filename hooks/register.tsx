@@ -44,7 +44,7 @@ const PAGE = 30
 let clientVersion: Promise<string> | undefined
 const version = ($: EngineInterface) => clientVersion ??=
   $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).then(s => String(JSON.parse(s).version), () => '0')
-// the hosted service; `/phro-learn login http://localhost:8000` reaches a local development server
+// the hosted service
 const DEFAULT_SERVER = 'https://work.phro.net'
 // One session per PC (the lead) talks to the server, so several open sessions cost one session's requests
 // and never spend the same refresh token twice. Others only queue candidates and read terms.json.
