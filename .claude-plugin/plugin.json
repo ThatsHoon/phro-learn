@@ -1,6 +1,6 @@
 {
   "name": "phro-learn",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "license": "MIT",
   "description": "Collect the AI and IT terms you meet while working with Claude: phro-learn picks them from Claude's answers into a desktop pane with a short meaning, its kind and the sentence it was met in, judging new candidates in batches to spend few tokens, or, once connected with /phro-learn login, sending only the candidate words, when they came up and the working folder's name to the workphro service, which judges them with no model call on your side.",
   "author": {

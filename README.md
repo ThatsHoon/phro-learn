@@ -43,6 +43,8 @@ claude plugin marketplace add ThatsHoon/phro && claude plugin install phro-learn
 /phro-learn login    workphro 연결 (브라우저에서 Google로 로그인하고 화면의 코드를 승인)
 ```
 
+이미 Claude와 일해 온 프로젝트라면 그 프로젝트 폴더에서 `/phro-learn scan`을 한 번 실행하세요. 지난 세션(포크 포함)의 답변, 문서, 코드 주석에서 용어를 한꺼번에 모읍니다. 읽을 것이 많아 판정에 토큰이 드는 작업이라 프로젝트마다 한 번만, 직접 입력했을 때만 돌고, 다시 실행하면 이미 했다고 알려 줍니다.
+
 연결하지 않아도 패널은 이 PC 안에서 동작합니다(아래 "연결하지 않고 쓰기").
 
 ## 무엇을 보내나요
@@ -74,7 +76,7 @@ Claude 데스크톱 옆에 뜨는 체크리스트입니다. 용어마다 풀네�
 | `/phro-learn status` | 모드, 등급, 전송 대기 수, 마지막 동기화 |
 | `/phro-learn sync` | 지금 보내고 용어집 변경분 받기 |
 | `/phro-learn upload` | 연결 전에 이 PC에서 모은 용어를 올릴지 다시 묻기 |
-| `/phro-learn scan` | 현재 세션의 지난 답변 전체에서 용어 다시 찾기 |
+| `/phro-learn scan` | 처음 한 번: 이 프로젝트의 지난 세션(포크 포함), 문서(`.md` 등), 코드 주석에서 많이 나온 용어 최대 600개를 모읍니다. 프로젝트마다 한 번만 돌며, 기록은 `~/.claude/phro-learning/scans/`에 있습니다. 끝나지 않은 채 멈췄다면 안내하는 기록 파일을 지운 뒤 다시 실행합니다 |
 | `/phro-learn judge` | 판정 대기 중인 후보를 지금 판정(로컬 모드) |
 | `/phro-learn stats` | 로컬 모드의 Haiku 호출 수와 토큰 사용량 |
 

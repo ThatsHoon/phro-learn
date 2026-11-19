@@ -189,7 +189,25 @@ function hasName(body: string, name: string): boolean {
 // is caught only when it is bold or in `names`, the names the service sends; others are missed — add a noun pass
 // per language if that matters
 export function candidates(text: string, db: TermsDb, names: readonly string[] = []): string[] {
-  const body = prose(text)
+  const seen = seenKeys(db)
+  const out: string[] = []
+  for (const raw of words(prose(text), names)) {
+    const word = raw.trim()
+    const key = normalize(word)
+    if (!isTermKey(word, key) || seen.has(key)) continue
+    seen.add(key)
+    out.push(word)
+    if (out.length === MAX_CANDIDATES) break
+  }
+  return out
+}
+
+/** A word that can be a term: not too short or long, not a number, an id or a stopword. */
+const isTermKey = (word: string, key: string) =>
+  key.length >= 2 && key.length <= 40 && !/^\d+$/.test(key) && !isIdLike(word) && !STOPWORDS.has(key)
+
+/** Every candidate-shaped word in prose, repeats included. */
+function words(body: string, names: readonly string[]): string[] {
   const found = [...body.matchAll(ACRONYM)].map(m => m[0])
   const local = (body.match(/[가-힣ぁ-ヿ一-鿿]/g) ?? []).length
   const isCjk = local > body.length * 0.15
@@ -199,19 +217,7 @@ export function candidates(text: string, db: TermsDb, names: readonly string[] =
   if (!isCjk) found.push(...[...body.matchAll(BOLD)].map(m => m[1]!).filter(isBoldName))
   // ponytail: one scan of the answer per name; build one matcher for the list when it passes tens of thousands
   found.push(...names.filter(name => hasName(body, name)))
-
-  const seen = seenKeys(db)
-  const out: string[] = []
-  for (const raw of found) {
-    const word = raw.trim()
-    const key = normalize(word)
-    if (key.length < 2 || key.length > 40 || /^\d+$/.test(key) || isIdLike(word)) continue
-    if (STOPWORDS.has(key) || seen.has(key)) continue
-    seen.add(key)
-    out.push(word)
-    if (out.length === MAX_CANDIDATES) break
-  }
-  return out
+  return found
 }
 
 /** The prose sentence a word was used in, markdown marks dropped, cut around the word when long. */
@@ -618,6 +624,285 @@ function masks($: EngineInterface) {
       project: sendProject ? projectName(cwd, home) : undefined,
     }
   })())
+}
+
+// ---------- first scan: once per project, typed by the person ----------
+
+// The scan reads every past answer of the project and its documents, and what it queues is judged by a model:
+// costly, so it runs once per project and never from a model's or a plugin's command run.
+const TYPED: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
+const SCAN_DIR = '.claude/phro-learning/scans'
+// ponytail: the 600 words used most; a long project has more, and later answers bring the rest one by one
+const SCAN_MAX = 600
+const READ_BYTES = 4 * 1024 * 1024
+const MAX_FILE_BYTES = 1024 * 1024
+const MAX_FILES = 3000
+const MAX_DEPTH = 6
+const CLAIM_MS = 300
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'target', 'vendor', 'coverage', '__pycache__', 'venv', 'site-packages'])
+const DOCS = new Set(['md', 'mdx', 'markdown', 'txt', 'rst', 'adoc'])
+// ponytail: line comments and block-comment lines only; a Python docstring or a comment after code is not read
+const SLASH = /^\s*(?:\/\/+!?|\/\*+!?|\*+(?!\/))\s?(.*?)(?:\*\/)?\s*$/
+const HASH = /^\s*#+(?![!\[])\s?(.*)$/
+const DASH = /^\s*--\s?(.*)$/
+const COMMENT: Record<string, RegExp> = {
+  ...Object.fromEntries('ts tsx js jsx mjs cjs go rs java kt kts c h cc cpp hpp cs swift scala php dart vue svelte'.split(' ').map(x => [x, SLASH])),
+  ...Object.fromEntries('py sh bash zsh rb yml yaml toml ps1 r pl'.split(' ').map(x => [x, HASH])),
+  ...Object.fromEntries('sql lua hs'.split(' ').map(x => [x, DASH])),
+}
+
+/** A file's comment text, one comment block per paragraph. */
+export function comments(src: string, ext: string): string {
+  const line = COMMENT[ext]
+  if (!line) return ''
+  return src
+    .split('\n')
+    .map(l => line.exec(l)?.[1] ?? '')
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/** The main thread's answers in transcript lines, with their time. Tool calls, thinking and subagent turns stay out. */
+export function answerTexts(lines: string): { text: string; at: string }[] {
+  const out: { text: string; at: string }[] = []
+  for (const line of lines.split('\n')) {
+    if (!line.includes('"assistant"') || !line.includes('"text"')) continue
+    let row: { type?: unknown; isSidechain?: unknown; timestamp?: unknown; message?: { content?: unknown } }
+    try {
+      row = JSON.parse(line)
+    } catch {
+      continue // the open session's last line can be half written
+    }
+    if (row.type !== 'assistant' || row.isSidechain || !Array.isArray(row.message?.content)) continue
+    const text = (row.message.content as { type?: unknown; text?: unknown }[])
+      .flatMap(c => (c?.type === 'text' && typeof c.text === 'string' ? [c.text] : []))
+      .join('\n\n')
+    if (text) out.push({ text, at: typeof row.timestamp === 'string' ? row.timestamp : '' })
+  }
+  return out
+}
+
+export type Found = { word: string; key: string; n: number; seen: string; context: string }
+
+/** Counts each candidate once per text it is in, keeping its earliest time and the sentence it had then. */
+export function tally(into: Map<string, Found>, text: string, at: string, names: readonly string[] = []): void {
+  const body = prose(text)
+  const here = new Set<string>()
+  for (const raw of words(body, names)) {
+    const word = raw.trim()
+    const key = normalize(word)
+    if (here.has(key) || !isTermKey(word, key)) continue
+    here.add(key)
+    const f = into.get(key)
+    if (!f) into.set(key, { word, key, n: 1, seen: at, context: sentenceOf(body, word) })
+    else {
+      f.n++
+      if (at && (!f.seen || at < f.seen)) Object.assign(f, { word, seen: at, context: sentenceOf(body, word) })
+    }
+  }
+}
+
+/** The words to queue: not seen before, not masked, the most used first. */
+export function pick(found: Iterable<Found>, db: TermsDb, skip?: (word: string) => boolean, max = SCAN_MAX): Found[] {
+  const seen = seenKeys(db)
+  return [...found]
+    .filter(f => !seen.has(f.key) && !skip?.(f.word))
+    .sort((a, b) => b.n - a.n || a.seen.localeCompare(b.seen))
+    .slice(0, max)
+}
+
+/**
+ * Whether the scan may run, from this project's record (`undefined`: no record). The reply when it may not.
+ * A record that cannot be read refuses: a scan that runs twice costs more than one that waits for a deleted file.
+ */
+export function scanVerdict(record: string | undefined, path: string): string | undefined {
+  if (record === undefined) return undefined
+  let m: { state?: unknown; at?: unknown; queued?: unknown } | undefined
+  try {
+    m = JSON.parse(record)
+  } catch {
+    m = undefined
+  }
+  const day = String(m?.at ?? '').slice(0, 10)
+  if (m?.state === 'failed') return undefined
+  if (m?.state === 'done') return tr('scan_done', { day, n: Number(m.queued) || 0 })
+  if (m?.state === 'running') return tr('scan_running', { day, path })
+  return tr('scan_unreadable', { path })
+}
+
+const hex = async (s: string) =>
+  [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join('')
+
+/** This project's scan record: one file per project root, kept apart from terms.json so no reset or account change clears it. */
+async function scanRecord($: EngineInterface): Promise<string> {
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+  if (!home) throw new Error('neither USERPROFILE nor HOME is set')
+  const root = (await $.session.root()).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const name = (root.split('/').pop() || 'root').replace(/[^\w.-]/g, '_').slice(0, 40)
+  return `${home}/${SCAN_DIR}/${name}-${await hex(root)}.json`
+}
+
+const readRecord = async ($: EngineInterface, path: string) => ((await isFile($, path)) ? $.fs.read(path) : undefined)
+
+declare global {
+  // the engine has it (its docs decode `$.fs.read` bytes with it); the es2023 lib the hooks are typed against does not name it yet
+  interface Uint8ArrayConstructor {
+    fromBase64(base64: string): Uint8Array
+  }
+}
+
+/** Calls `each` with whole lines of a file of any size, 4 MiB at a time. */
+async function eachLines($: EngineInterface, path: string, size: number, each: (lines: string) => void): Promise<void> {
+  const utf8 = new TextDecoder()
+  let rest = new Uint8Array(0)
+  for (let at = 0; at < size; at += READ_BYTES) {
+    const got = Uint8Array.fromBase64((await $.fs.read(path, { as: 'bytes', offset: at, length: READ_BYTES })).base64)
+    const buf = new Uint8Array(rest.length + got.length)
+    buf.set(rest)
+    buf.set(got, rest.length)
+    const end = buf.lastIndexOf(10) + 1 // a newline byte is never inside a UTF-8 character
+    if (end) each(utf8.decode(buf.subarray(0, end)))
+    rest = buf.slice(end)
+    if (got.length < READ_BYTES) break
+  }
+  if (rest.length) each(utf8.decode(rest))
+}
+
+/** Documents and code files under the root, breadth first, leaving dot folders, links and build output. */
+async function projectFiles($: EngineInterface, root: string): Promise<{ path: string; ext: string; at: string }[]> {
+  const out: { path: string; ext: string; at: string }[] = []
+  const dirs: [string, number][] = [[root, 0]]
+  for (let i = 0; i < dirs.length && out.length < MAX_FILES; i++) {
+    const [dir, depth] = dirs[i]!
+    const entries = await $.fs.list(dir).catch(err => {
+      if (depth === 0) throw err
+      return [] // a folder this user may not open
+    })
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.isLink) continue
+      const path = `${dir}/${e.name}`
+      if (e.kind === 'dir') {
+        if (depth < MAX_DEPTH && !SKIP_DIRS.has(e.name.toLowerCase())) dirs.push([path, depth + 1])
+        continue
+      }
+      const ext = e.name.includes('.') ? e.name.split('.').pop()!.toLowerCase() : ''
+      if (e.kind === 'file' && e.size <= MAX_FILE_BYTES && (DOCS.has(ext) || COMMENT[ext])) out.push({ path, ext, at: new Date(e.mtimeMs).toISOString() })
+      if (out.length >= MAX_FILES) break
+    }
+  }
+  return out
+}
+
+/**
+ * The folder Claude Code keeps this project's transcripts in: the session folder's path, every character but a letter or
+ * digit made "-". Worked out rather than asked, since `$.session.info()` is missing from older engines, where naming it
+ * keeps the whole module from loading. ponytail: a path long enough that Claude Code shortens its folder name is not found
+ */
+async function transcripts($: EngineInterface): Promise<string> {
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+  const config = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${home}/.claude`
+  return `${config}/projects/${(await $.session.cwd()).replace(/[^a-zA-Z0-9]/g, '-')}`
+}
+
+const isDir = ($: EngineInterface, path: string) =>
+  $.fs.list(path).then(
+    () => true,
+    () => false,
+  )
+
+/** Reads the project's past answers (forks included) and its documents and code comments into candidate counts. */
+async function gather($: EngineInterface, names: readonly string[]): Promise<{ found: Map<string, Found>; answers: number; files: number }> {
+  const found = new Map<string, Found>()
+  let answers = 0
+  const dir = await transcripts($)
+  if (await isDir($, dir)) {
+    // every session and fork of this project is a .jsonl here; subagents' runs sit in folders and stay out
+    for (const e of await $.fs.list(dir)) {
+      if (e.kind !== 'file' || !e.name.endsWith('.jsonl')) continue
+      await eachLines($, `${dir}/${e.name}`, e.size, lines => {
+        for (const a of answerTexts(lines)) {
+          answers++
+          tally(found, a.text, a.at, names)
+        }
+      })
+    }
+  }
+  const files = await projectFiles($, await $.session.root())
+  for (const f of files) {
+    const src = await $.fs.read(f.path)
+    const text = DOCS.has(f.ext) ? src : comments(src, f.ext)
+    for (const part of text.split(/\n\s*\n/)) if (part.trim()) tally(found, part, f.at, names)
+  }
+  return { found, answers, files: files.length }
+}
+
+let scanning = false
+
+/** The first scan, run once per project. Every refusal is a reply; nothing is queued twice. */
+async function firstScan($: EngineInterface, origin: string): Promise<string> {
+  if (!TYPED.has(origin)) return tr('scan_typed')
+  if (scanning) return tr('scan_busy')
+  scanning = true
+  try {
+    const path = await scanRecord($)
+    const refused = scanVerdict(await readRecord($, path), path)
+    if (refused) return refused
+    const mask = (await auth($)) ? await masks($) : undefined
+    if (mask?.isOff) return tr('scan_off')
+
+    // claim, then look again: of two sessions that claimed at once, the last write holds it
+    const by = Math.random().toString(36).slice(2)
+    await $.fs.write(path, JSON.stringify({ state: 'running', at: new Date(await $.clock.now()).toISOString(), by }) + '\n')
+    await new Promise<void>(done => $.clock.after(CLAIM_MS, done))
+    if (JSON.parse((await readRecord($, path)) ?? '{}').by !== by) return tr('scan_busy')
+
+    let queued: number, answers: number, files: number
+    try {
+      const names = mask ? await catalogNames($) : []
+      const g = await gather($, names)
+      answers = g.answers
+      files = g.files
+      queued = await serial(async () => {
+        const db = await load($)
+        const now = new Date(await $.clock.now()).toISOString()
+        const fresh = pick(g.found.values(), db, mask && (w => isSecretLike(w) || mask.keys.has(normalize(w))))
+          .map((f): Pending => ({ word: f.word, key: f.key, context: f.context, seen: f.seen || now, ...(mask?.project ? { p: mask.project } : {}) }))
+        if (fresh.length) await save($, { ...db, pending: [...db.pending, ...fresh] })
+        return fresh.length
+      })
+    } catch (err) {
+      // nothing was queued: the record lets the scan run again
+      await $.fs.write(path, JSON.stringify({ state: 'failed', at: new Date(await $.clock.now()).toISOString(), error: String(err).slice(0, 200) }) + '\n')
+      return tr('scan_failed', { err: String(err).slice(0, 200) })
+    }
+    // ponytail: a crash between the queue's save and this write leaves "running", which refuses until the file is deleted
+    await $.fs.write(path, JSON.stringify({ state: 'done', at: new Date(await $.clock.now()).toISOString(), queued, answers, files }) + '\n')
+
+    if (await auth($)) {
+      void tick($, true).catch(err => reportFailure($, err))
+      return tr('scan_sent', { n: queued, answers, files })
+    }
+    $.clock.after(0, () => {
+      void judgeAll($)
+        .then(r => (r.asked ? $.ui.toast(tr('judged', r)) : undefined))
+        .catch(err => reportFailure($, err))
+    })
+    return tr('scan_local', { n: queued, answers, files })
+  } finally {
+    scanning = false
+  }
+}
+
+/** Judges batch after batch until nothing waits, or another run in this session holds the judge. */
+async function judgeAll($: EngineInterface): Promise<{ asked: number; added: number }> {
+  const total = { asked: 0, added: 0 }
+  for (;;) {
+    const r = await judge($, true)
+    if (!r.asked) return total
+    total.asked += r.asked
+    total.added += r.added
+  }
 }
 
 const STATUSES: readonly string[] = ['todo', 'review', 'done', 'removed']
@@ -1138,7 +1423,8 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'phro-learn',
       description:
-        'Open the AI/IT term board ("scan" queues and judges this session\'s terms, "judge" judges the waiting candidates now, ' +
+        'Open the AI/IT term board ("scan" reads this project\'s past sessions and documents once, the first time only; ' +
+        '"judge" judges the waiting candidates now, ' +
         '"stats" shows Haiku token use, ' +
         '"login" connects to the workphro service so it judges instead of Haiku, "logout", "status", "sync", ' +
         '"upload" asks again whether to upload the terms judged on this PC)',
@@ -1189,28 +1475,13 @@ export const register: Register = (on, options) => {
       return { text: r.asked ? `Judged ${r.asked} candidates: ${r.added} new terms.` : 'No candidates waiting.' }
     }
 
+    if (arg === 'scan') return { text: await firstScan($, e.origin.kind) }
+
     revive($)
     await $.ui.open({ id: PANE, title: 'phro-learn' })
     await update($, isOpen, () => true)
     $.ui.invalidate('ui.render') // an already open pane draws again with live handles
-    if (arg !== 'scan') return { text: 'Term board opened.' }
-
-    const answers = (await $.session.messages())
-      .filter(m => m.role === 'assistant' && m.text)
-      .map(m => m.text)
-      .join('\n\n')
-    let queued = 0
-    for (let i = 0; i < MAX_SCAN_BATCHES; i++) {
-      const n = await collect($, answers) // each pass queues the next unseen 40
-      if (n === 0) break
-      queued += n
-    }
-    if (await auth($)) {
-      await tick($, true)
-      return { text: `Scanned this session: ${queued} candidates queued for the service.` }
-    }
-    const r = await judge($, true)
-    return { text: `Scanned this session: ${queued} candidates queued, ${r.asked} judged, ${r.added} new terms.` }
+    return { text: 'Term board opened.' }
   })
 
   on('turn.complete', async ($, e, next) => {

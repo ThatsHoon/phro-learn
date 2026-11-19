@@ -28,7 +28,7 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "tab_review": "Wiederholen",
       "tab_done": "Gelernt",
       "tab_removed": "Entfernt",
-      "empty_todo": "Noch keine Begriffe. Führe /phro-learn scan aus, um diese Sitzung durchzugehen.",
+      "empty_todo": "Noch keine Begriffe. Führe /phro-learn scan einmal aus, um die Begriffe aus den bisherigen Sitzungen und Dokumenten dieses Projekts zu sammeln.",
       "empty_review": "Nichts zu wiederholen. Abgehakte Begriffe landen hier.",
       "empty_done": "Noch keine gelernten Begriffe.",
       "empty_removed": "Keine entfernten Begriffe. Ein entfernter Begriff wird nie wieder hinzugefügt.",
@@ -54,7 +54,16 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "upload": "Hochladen",
       "upload_keep": "Hier behalten",
       "uploading": "{n} lokale Begriffe werden hochgeladen",
-      "only_here": "nur dieser PC"
+      "only_here": "nur dieser PC",
+      "scan_typed": "Der erste Scan läuft nur, wenn du /phro-learn scan selbst eingibst.",
+      "scan_busy": "Ein anderer Lauf startet gerade den ersten Scan dieses Projekts. Hier lief nichts.",
+      "scan_off": "Dieses Projekt ist per .termboardignore ausgeschlossen, daher läuft der erste Scan nicht.",
+      "scan_done": "Der erste Scan dieses Projekts lief bereits am {day} ({n} Kandidaten). Er läuft nur einmal und daher nicht erneut. Neue Antworten werden weiter automatisch gesammelt.",
+      "scan_running": "Der erste Scan dieses Projekts begann am {day} und wurde nicht beendet. Wenn keine andere Sitzung scannt, lösche {path} und führe ihn erneut aus.",
+      "scan_unreadable": "Der Scan-Eintrag {path} ist nicht lesbar, daher läuft der Scan nicht. Lösche die Datei, um ihn erneut auszuführen.",
+      "scan_failed": "Der erste Scan ist fehlgeschlagen und hat nichts eingereiht ({err}). Du kannst ihn erneut ausführen.",
+      "scan_sent": "📘 Erster Scan: {answers} Antworten und {files} Dateien gelesen, {n} Kandidaten für workphro eingereiht. Er läuft einmal pro Projekt.",
+      "scan_local": "📘 Erster Scan: {answers} Antworten und {files} Dateien gelesen, {n} Kandidaten eingereiht; Haiku bewertet sie im Hintergrund. Er läuft einmal pro Projekt."
     }
   },
   "en": {
@@ -85,7 +94,7 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "tab_review": "Review",
       "tab_done": "Learned",
       "tab_removed": "Removed",
-      "empty_todo": "No terms yet. Run /phro-learn scan to go over this session.",
+      "empty_todo": "No terms yet. Run /phro-learn scan once to gather the terms of this project's past sessions and documents.",
       "empty_review": "Nothing to review. Terms you check off come here.",
       "empty_done": "No learned terms yet.",
       "empty_removed": "No removed terms. A removed term is never added again.",
@@ -111,7 +120,16 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "upload": "Upload",
       "upload_keep": "Keep here",
       "uploading": "Uploading {n} local terms",
-      "only_here": "this PC only"
+      "only_here": "this PC only",
+      "scan_typed": "The first scan runs only when you type /phro-learn scan yourself.",
+      "scan_busy": "Another run is starting this project's first scan. Nothing ran here.",
+      "scan_off": "This project is left out by its .termboardignore, so the first scan does not run.",
+      "scan_done": "This project's first scan already ran on {day} ({n} candidates queued), so it does not run again. New answers are still collected as you work.",
+      "scan_running": "This project's first scan started on {day} and has not finished. If no other session is scanning, delete {path} and run it again.",
+      "scan_unreadable": "The first-scan record {path} cannot be read, so the scan does not run. Delete that file to run it again.",
+      "scan_failed": "The first scan failed and queued nothing ({err}). You can run it again.",
+      "scan_sent": "📘 First scan: {answers} answers and {files} files read, {n} candidates queued for workphro. It runs once per project.",
+      "scan_local": "📘 First scan: {answers} answers and {files} files read, {n} candidates queued; Haiku judges them in the background. It runs once per project."
     }
   },
   "es": {
@@ -142,7 +160,7 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "tab_review": "Repasar",
       "tab_done": "Aprendidos",
       "tab_removed": "Eliminados",
-      "empty_todo": "Aún no hay términos. Ejecuta /phro-learn scan para revisar esta sesión.",
+      "empty_todo": "Aún no hay términos. Ejecuta /phro-learn scan una vez para reunir los términos de las sesiones y documentos anteriores de este proyecto.",
       "empty_review": "Nada que repasar. Los términos que marques llegan aquí.",
       "empty_done": "Aún no hay términos aprendidos.",
       "empty_removed": "No hay términos eliminados. Un término eliminado no se vuelve a añadir.",
@@ -168,7 +186,16 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "upload": "Subir",
       "upload_keep": "Dejar aquí",
       "uploading": "Subiendo {n} términos locales",
-      "only_here": "solo este PC"
+      "only_here": "solo este PC",
+      "scan_typed": "El primer escaneo solo se ejecuta cuando escribes /phro-learn scan tú mismo.",
+      "scan_busy": "Otra ejecución está iniciando el primer escaneo de este proyecto. Aquí no se ejecutó nada.",
+      "scan_off": "Este proyecto está excluido por su .termboardignore, así que el primer escaneo no se ejecuta.",
+      "scan_done": "El primer escaneo de este proyecto ya se ejecutó el {day} ({n} candidatos). Solo se ejecuta una vez, así que no vuelve a ejecutarse. Las respuestas nuevas se siguen recogiendo solas.",
+      "scan_running": "El primer escaneo de este proyecto empezó el {day} y no terminó. Si ninguna otra sesión está escaneando, borra {path} y vuelve a ejecutarlo.",
+      "scan_unreadable": "No se puede leer el registro del escaneo {path}, así que el escaneo no se ejecuta. Borra ese archivo para volver a ejecutarlo.",
+      "scan_failed": "El primer escaneo falló y no añadió nada ({err}). Puedes volver a ejecutarlo.",
+      "scan_sent": "📘 Primer escaneo: {answers} respuestas y {files} archivos leídos, {n} candidatos en cola para workphro. Se ejecuta una vez por proyecto.",
+      "scan_local": "📘 Primer escaneo: {answers} respuestas y {files} archivos leídos, {n} candidatos en cola; Haiku los evalúa en segundo plano. Se ejecuta una vez por proyecto."
     }
   },
   "fr": {
@@ -199,7 +226,7 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "tab_review": "À réviser",
       "tab_done": "Appris",
       "tab_removed": "Retirés",
-      "empty_todo": "Aucun terme pour l’instant. Lancez /phro-learn scan pour parcourir cette session.",
+      "empty_todo": "Aucun terme pour l'instant. Lance /phro-learn scan une fois pour réunir les termes des sessions et documents passés de ce projet.",
       "empty_review": "Rien à réviser. Les termes cochés arrivent ici.",
       "empty_done": "Aucun terme appris pour l'instant.",
       "empty_removed": "Aucun terme retiré. Un terme retiré n’est jamais ajouté de nouveau.",
@@ -225,7 +252,16 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "upload": "Envoyer",
       "upload_keep": "Garder ici",
       "uploading": "Envoi de {n} termes locaux",
-      "only_here": "ce PC uniquement"
+      "only_here": "ce PC uniquement",
+      "scan_typed": "Le premier scan ne s'exécute que si tu tapes /phro-learn scan toi-même.",
+      "scan_busy": "Une autre exécution lance le premier scan de ce projet. Rien n'a tourné ici.",
+      "scan_off": "Ce projet est exclu par son .termboardignore, donc le premier scan ne s'exécute pas.",
+      "scan_done": "Le premier scan de ce projet a déjà eu lieu le {day} ({n} candidats). Il ne s'exécute qu'une fois, donc pas de nouveau. Les nouvelles réponses sont toujours collectées automatiquement.",
+      "scan_running": "Le premier scan de ce projet a commencé le {day} et ne s'est pas terminé. Si aucune autre session ne scanne, supprime {path} et relance-le.",
+      "scan_unreadable": "Le relevé du scan {path} est illisible, donc le scan ne s'exécute pas. Supprime ce fichier pour le relancer.",
+      "scan_failed": "Le premier scan a échoué et n'a rien ajouté ({err}). Tu peux le relancer.",
+      "scan_sent": "📘 Premier scan : {answers} réponses et {files} fichiers lus, {n} candidats en attente pour workphro. Il s'exécute une fois par projet.",
+      "scan_local": "📘 Premier scan : {answers} réponses et {files} fichiers lus, {n} candidats en attente ; Haiku les évalue en arrière-plan. Il s'exécute une fois par projet."
     }
   },
   "id": {
@@ -256,7 +292,7 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "tab_review": "Untuk diulang",
       "tab_done": "Sudah dipelajari",
       "tab_removed": "Dihapus",
-      "empty_todo": "Belum ada istilah. Jalankan /phro-learn scan untuk memeriksa sesi ini.",
+      "empty_todo": "Belum ada istilah. Jalankan /phro-learn scan sekali untuk mengumpulkan istilah dari sesi dan dokumen proyek ini sebelumnya.",
       "empty_review": "Belum ada yang perlu diulang. Istilah yang kamu centang masuk ke sini.",
       "empty_done": "Belum ada istilah yang sudah dipelajari.",
       "empty_removed": "Tidak ada istilah yang dihapus. Istilah yang dihapus tidak akan ditambahkan lagi.",
@@ -282,7 +318,16 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "upload": "Unggah",
       "upload_keep": "Simpan di sini",
       "uploading": "Mengunggah {n} istilah lokal",
-      "only_here": "hanya PC ini"
+      "only_here": "hanya PC ini",
+      "scan_typed": "Pemindaian pertama hanya berjalan saat kamu sendiri mengetik /phro-learn scan.",
+      "scan_busy": "Proses lain sedang memulai pemindaian pertama proyek ini. Tidak ada yang berjalan di sini.",
+      "scan_off": "Proyek ini dikecualikan oleh .termboardignore, jadi pemindaian pertama tidak berjalan.",
+      "scan_done": "Pemindaian pertama proyek ini sudah berjalan pada {day} ({n} kandidat). Pemindaian ini hanya berjalan sekali, jadi tidak dijalankan lagi. Jawaban baru tetap dikumpulkan otomatis.",
+      "scan_running": "Pemindaian pertama proyek ini dimulai pada {day} dan belum selesai. Jika tidak ada sesi lain yang memindai, hapus {path} lalu jalankan lagi.",
+      "scan_unreadable": "Catatan pemindaian {path} tidak bisa dibaca, jadi pemindaian tidak berjalan. Hapus file itu untuk menjalankannya lagi.",
+      "scan_failed": "Pemindaian pertama gagal dan tidak menambahkan apa pun ({err}). Kamu bisa menjalankannya lagi.",
+      "scan_sent": "📘 Pemindaian pertama: {answers} jawaban dan {files} file dibaca, {n} kandidat diantrekan untuk workphro. Berjalan sekali per proyek.",
+      "scan_local": "📘 Pemindaian pertama: {answers} jawaban dan {files} file dibaca, {n} kandidat diantrekan; Haiku menilainya di latar belakang. Berjalan sekali per proyek."
     }
   },
   "it": {
@@ -313,7 +358,7 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "tab_review": "Ripasso",
       "tab_done": "Imparati",
       "tab_removed": "Rimossi",
-      "empty_todo": "Ancora nessun termine. Esegui /phro-learn scan per esaminare questa sessione.",
+      "empty_todo": "Ancora nessun termine. Esegui /phro-learn scan una volta per raccogliere i termini delle sessioni e dei documenti passati di questo progetto.",
       "empty_review": "Niente da ripassare. I termini spuntati arrivano qui.",
       "empty_done": "Nessun termine imparato per ora.",
       "empty_removed": "Nessun termine rimosso. Un termine rimosso non viene mai aggiunto di nuovo.",
@@ -339,7 +384,16 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "upload": "Carica",
       "upload_keep": "Tieni qui",
       "uploading": "Caricamento di {n} termini locali",
-      "only_here": "solo questo PC"
+      "only_here": "solo questo PC",
+      "scan_typed": "La prima scansione parte solo quando digiti tu /phro-learn scan.",
+      "scan_busy": "Un'altra esecuzione sta avviando la prima scansione di questo progetto. Qui non è partito nulla.",
+      "scan_off": "Questo progetto è escluso dal suo .termboardignore, quindi la prima scansione non parte.",
+      "scan_done": "La prima scansione di questo progetto è già stata eseguita il {day} ({n} candidati). Si esegue una sola volta, quindi non riparte. Le nuove risposte continuano a essere raccolte da sole.",
+      "scan_running": "La prima scansione di questo progetto è iniziata il {day} e non è finita. Se nessun'altra sessione sta scansionando, elimina {path} ed eseguila di nuovo.",
+      "scan_unreadable": "Il registro della scansione {path} non è leggibile, quindi la scansione non parte. Elimina quel file per eseguirla di nuovo.",
+      "scan_failed": "La prima scansione non è riuscita e non ha aggiunto nulla ({err}). Puoi eseguirla di nuovo.",
+      "scan_sent": "📘 Prima scansione: lette {answers} risposte e {files} file, {n} candidati in coda per workphro. Si esegue una volta per progetto.",
+      "scan_local": "📘 Prima scansione: lette {answers} risposte e {files} file, {n} candidati in coda; Haiku li valuta in background. Si esegue una volta per progetto."
     }
   },
   "ja": {
@@ -370,7 +424,7 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "tab_review": "復習",
       "tab_done": "学習済み",
       "tab_removed": "削除済み",
-      "empty_todo": "まだ用語がありません。/phro-learn scan でこのセッションをスキャンしてください。",
+      "empty_todo": "まだ用語がありません。/phro-learn scan を一度実行すると、このプロジェクトの過去のセッションと文書から用語を集めます。",
       "empty_review": "復習する用語はありません。チェックした用語がここに入ります。",
       "empty_done": "学習を終えた用語はありません。",
       "empty_removed": "削除した用語はありません。削除した用語は再び追加されません。",
@@ -396,7 +450,16 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "upload": "アップロード",
       "upload_keep": "このまま",
       "uploading": "ローカル用語 {n}件をアップロードします",
-      "only_here": "このPCのみ"
+      "only_here": "このPCのみ",
+      "scan_typed": "初回スキャンは /phro-learn scan を自分で入力したときだけ実行されます。",
+      "scan_busy": "別の実行がこのプロジェクトの初回スキャンを始めています。ここでは実行していません。",
+      "scan_off": "このプロジェクトは .termboardignore で除外されているため、初回スキャンは実行しません。",
+      "scan_done": "このプロジェクトの初回スキャンは {day} に実行済みです(候補 {n} 件)。最初の一回だけのスキャンなので、再実行しません。新しい回答の用語は引き続き自動で集まります。",
+      "scan_running": "このプロジェクトの初回スキャンは {day} に始まり、終わっていません。スキャン中の別セッションがなければ {path} を削除して再実行してください。",
+      "scan_unreadable": "初回スキャンの記録 {path} を読めないため、スキャンは実行しません。再実行するにはそのファイルを削除してください。",
+      "scan_failed": "初回スキャンに失敗し、何も追加していません({err})。もう一度実行できます。",
+      "scan_sent": "📘 初回スキャン: 回答 {answers} 件とファイル {files} 件を読み、候補 {n} 件を workphro への送信待ちに入れました。プロジェクトごとに一度だけ実行されます。",
+      "scan_local": "📘 初回スキャン: 回答 {answers} 件とファイル {files} 件を読み、候補 {n} 件を追加しました。Haiku がバックグラウンドで判定します。プロジェクトごとに一度だけ実行されます。"
     }
   },
   "ko": {
@@ -427,7 +490,7 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "tab_review": "복습",
       "tab_done": "학습 완료",
       "tab_removed": "제거",
-      "empty_todo": "아직 용어가 없습니다. /phro-learn scan 으로 이 세션을 훑어보세요.",
+      "empty_todo": "아직 용어가 없습니다. /phro-learn scan 을 한 번 실행하면 이 프로젝트의 지난 세션과 문서에서 용어를 모읍니다.",
       "empty_review": "복습할 용어가 없습니다. 체크한 용어가 여기로 옵니다.",
       "empty_done": "학습을 마친 용어가 없습니다.",
       "empty_removed": "제거한 용어가 없습니다. 제거한 용어는 다시 추가되지 않습니다.",
@@ -453,7 +516,16 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "upload": "올리기",
       "upload_keep": "두기",
       "uploading": "로컬 용어 {n}개를 올립니다",
-      "only_here": "이 PC만"
+      "only_here": "이 PC만",
+      "scan_typed": "첫 스캔은 /phro-learn scan 을 직접 입력했을 때만 실행됩니다.",
+      "scan_busy": "다른 실행이 이 프로젝트의 첫 스캔을 시작하고 있습니다. 여기서는 실행하지 않았습니다.",
+      "scan_off": "이 프로젝트는 .termboardignore 로 제외되어 있어 첫 스캔을 실행하지 않습니다.",
+      "scan_done": "이 프로젝트의 첫 스캔은 {day}에 이미 실행했습니다(후보 {n}개). 맨 처음 한 번만 도는 스캔이라 다시 실행하지 않습니다. 새 답변의 용어는 계속 자동으로 모입니다.",
+      "scan_running": "이 프로젝트의 첫 스캔이 {day}에 시작되어 끝나지 않았습니다. 스캔 중인 다른 세션이 없다면 {path} 를 지우고 다시 실행하세요.",
+      "scan_unreadable": "첫 스캔 기록 {path} 를 읽을 수 없어 스캔을 실행하지 않습니다. 다시 실행하려면 그 파일을 지우세요.",
+      "scan_failed": "첫 스캔이 실패해 아무것도 넣지 않았습니다({err}). 다시 실행할 수 있습니다.",
+      "scan_sent": "📘 첫 스캔: 답변 {answers}개, 파일 {files}개를 읽어 후보 {n}개를 workphro로 보낼 대기열에 넣었습니다. 프로젝트마다 한 번만 실행됩니다.",
+      "scan_local": "📘 첫 스캔: 답변 {answers}개, 파일 {files}개를 읽어 후보 {n}개를 넣었습니다. Haiku가 백그라운드에서 판정합니다. 프로젝트마다 한 번만 실행됩니다."
     }
   },
   "pt": {
@@ -484,7 +556,7 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "tab_review": "Revisar",
       "tab_done": "Aprendidos",
       "tab_removed": "Removidos",
-      "empty_todo": "Nenhum termo ainda. Execute /phro-learn scan para analisar esta sessão.",
+      "empty_todo": "Ainda não há termos. Execute /phro-learn scan uma vez para reunir os termos das sessões e documentos anteriores deste projeto.",
       "empty_review": "Nada para revisar. Os termos que você marcar vêm para cá.",
       "empty_done": "Nenhum termo aprendido ainda.",
       "empty_removed": "Nenhum termo removido. Um termo removido nunca é adicionado de novo.",
@@ -510,7 +582,16 @@ export const TEXT: Record<string, { language: string; strings: Record<string, st
       "upload": "Enviar",
       "upload_keep": "Manter aqui",
       "uploading": "Enviando {n} termos locais",
-      "only_here": "só este PC"
+      "only_here": "só este PC",
+      "scan_typed": "A primeira varredura só roda quando você mesmo digita /phro-learn scan.",
+      "scan_busy": "Outra execução está iniciando a primeira varredura deste projeto. Nada rodou aqui.",
+      "scan_off": "Este projeto está excluído pelo .termboardignore, então a primeira varredura não roda.",
+      "scan_done": "A primeira varredura deste projeto já rodou em {day} ({n} candidatos). Ela roda só uma vez, então não roda de novo. Novas respostas continuam sendo coletadas sozinhas.",
+      "scan_running": "A primeira varredura deste projeto começou em {day} e não terminou. Se nenhuma outra sessão estiver varrendo, apague {path} e execute de novo.",
+      "scan_unreadable": "O registro da varredura {path} não pode ser lido, então a varredura não roda. Apague esse arquivo para executá-la de novo.",
+      "scan_failed": "A primeira varredura falhou e não adicionou nada ({err}). Você pode executá-la de novo.",
+      "scan_sent": "📘 Primeira varredura: {answers} respostas e {files} arquivos lidos, {n} candidatos na fila para o workphro. Roda uma vez por projeto.",
+      "scan_local": "📘 Primeira varredura: {answers} respostas e {files} arquivos lidos, {n} candidatos na fila; o Haiku os avalia em segundo plano. Roda uma vez por projeto."
     }
   }
 }
