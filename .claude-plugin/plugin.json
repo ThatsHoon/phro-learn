@@ -1,8 +1,8 @@
 {
   "name": "phro-learn",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "license": "MIT",
-  "description": "Collect the AI and IT terms you meet while working with Claude: phro-learn picks them from Claude's answers into a desktop pane with a short meaning, its kind and the sentence it was met in, judging new candidates in batches to spend few tokens, or, once connected with /phro-learn login, sending only the candidate words to the workphro service, which judges them with no model call on your side.",
+  "description": "Collect the AI and IT terms you meet while working with Claude: phro-learn picks them from Claude's answers into a desktop pane with a short meaning, its kind and the sentence it was met in, judging new candidates in batches to spend few tokens, or, once connected with /phro-learn login, sending only the candidate words, when they came up and the working folder's name to the workphro service, which judges them with no model call on your side.",
   "author": {
     "name": "thatshoon"
   },
@@ -14,6 +14,13 @@
       "description": "The language your terms are collected and explained in on workphro (ko, en, ja, de, es, fr, pt, it, id). \"account\" keeps the language your workphro account already has.",
       "default": "account",
       "options": ["account", "ko", "en", "ja", "de", "es", "fr", "pt", "it", "id"]
+    },
+    "project": {
+      "type": "string",
+      "title": "Show which project a term came from",
+      "description": "On: each word sent to workphro carries the name of the folder Claude was working in (the folder's own name, never its path or your home folder), stored encrypted under your account. Off: the folder name stays on this PC.",
+      "default": "on",
+      "options": ["on", "off"]
     }
   }
 }

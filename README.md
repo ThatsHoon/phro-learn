@@ -47,10 +47,11 @@ claude plugin marketplace add ThatsHoon/phro && claude plugin install phro-learn
 
 ## 무엇을 보내나요
 
-연결했을 때 workphro로 가는 것은 **용어 후보 낱말과 나온 횟수뿐**입니다.
+연결했을 때 workphro로 가는 것은 **용어 후보 낱말, 나온 횟수와 시각, 작업 폴더의 이름**입니다.
 
-- 보내지 않는 것: 답변 원문, 용어가 나온 문장, 코드, 파일 경로, 프로젝트 이름, 세션 정보.
-- 보내기 전에 거르는 것: 작업 폴더 경로의 각 이름, git remote의 소유자·저장소 이름, `package.json`·`pyproject.toml`의 이름, 키·토큰처럼 보이는 문자열, 프로젝트 루트 `.termboardignore`에 한 줄씩 적은 단어.
+- 작업 폴더의 이름: Claude가 일하던 폴더의 이름 하나(`C:\work\shop-api`라면 `shop-api`)입니다. workphro가 용어마다 어느 프로젝트에서 나왔는지 보여 주는 데 쓰고, 계정의 키로 암호화해 둡니다. 홈 폴더나 그 위 폴더에서 연 세션은 보내지 않습니다. 플러그인 설정의 `project`를 `off`로 두면 이 PC에만 남습니다.
+- 보내지 않는 것: 답변 원문, 용어가 나온 문장, 코드, 파일 경로, 세션 정보.
+- 보내기 전에 낱말에서 거르는 것: 작업 폴더 경로의 각 이름, git remote의 소유자·저장소 이름, `package.json`·`pyproject.toml`의 이름, 키·토큰처럼 보이는 문자열, 프로젝트 루트 `.termboardignore`에 한 줄씩 적은 단어.
 - 프로젝트 하나를 통째로 빼려면 그 루트의 `.termboardignore`에 `*` 한 줄을 둡니다.
 - 패널의 **제거** 탭에 둔 용어는 다시 나와도 모으지 않고 보내지도 않습니다.
 

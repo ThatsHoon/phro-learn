@@ -3,7 +3,7 @@ import type { TestBody } from 'claude-code/testing'
 
 import type { Remote, Term } from '../types'
 import {
-  applyRemote, attachIds, batchKey, candidates, emptyDb, enqueue, isSecretLike, localOnly, maskKeys, migrate, normalize, putBack, SEND_WAIT_MS, upload, uploadAsk,
+  applyRemote, attachIds, batchKey, candidates, emptyDb, enqueue, isSecretLike, localOnly, maskKeys, migrate, normalize, projectName, putBack, SEND_WAIT_MS, upload, uploadAsk,
 } from './register'
 
 const NOW = '2026-11-15T00:00:00.000Z'
@@ -25,6 +25,15 @@ test('the project\'s own names and .termboardignore lines are masked, and * turn
 
   const db = enqueue(emptyDb(), '이 작업은 RAG 와 Atlas 를 함께 씁니다.', NOW, w => m.keys.has(normalize(w)))
   expect(db.pending.map(p => p.word)).toEqual(['RAG'])
+})
+
+test("a term carries the session folder's own name, never the path, the home folder or a folder above it", () => {
+  expect(projectName('C:\\Users\\kim\\work\\Atlas', 'C:\\Users\\kim')).toBe('Atlas')
+  expect(projectName('/home/kim/shop-api/', '/home/kim')).toBe('shop-api')
+  for (const cwd of ['C:\\Users\\kim', 'c:/users/kim/', 'C:\\Users', 'C:\\', '/']) expect(projectName(cwd, 'C:\\Users\\kim')).toBeUndefined()
+  expect(projectName('/srv/a8Kd92LmQz71XyPw04RtBn6Vc', '/home/kim')).toBeUndefined()
+  const db = enqueue(emptyDb(), 'RAG 를 씁니다.', NOW, undefined, undefined, 'Atlas')
+  expect(db.pending.map(p => p.p)).toEqual(['Atlas'])
 })
 
 test('server terms land in the local copy: new on top, same id or same key replaced, pending skipped', () => {
@@ -283,6 +292,8 @@ test('login connects, and from then on candidates go to the service and no model
   expect(ingest?.auth).toBe('Bearer at')
   expect(ingest?.body.items.map((i: { t: string }) => i.t)).toEqual(['LoRA', 'beam search'])
   expect(JSON.stringify(ingest?.body)).not.toContain('secret')
+  // each word goes with the folder's own name and when it came up
+  expect(ingest?.body.items.map((i: { p?: string; s?: string }) => [i.p, typeof i.s])).toEqual([['w', 'string'], ['w', 'string']])
   expect(models).toBe(0)
   // new words: no fetch right after the send, one when the service said they would be judged
   const fetchedAfter = () => sent.slice(sent.indexOf(ingest!)).some(s => s.url.startsWith('/me/terms'))

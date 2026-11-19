@@ -37,6 +37,8 @@ export type Pending = {
   seen: string
   /** a local term the member chose to upload: it goes out although a term of its key is already here */
   up?: true
+  /** the name of the folder the session ran in (never the path), sent with the word unless the project option is off */
+  p?: string
 }
 
 /** ~/.claude/phro-learning/terms.json */

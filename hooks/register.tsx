@@ -69,6 +69,8 @@ let strings = TEXT.en!.strings
 let lang = 'en'
 // the language chosen when the plugin was installed (userConfig); 'account' leaves the account's language as it is
 let wantLang = 'account'
+// the project option: off keeps the session folder's name on this PC
+let sendProject = true
 
 /** The language local mode uses: the one chosen at install, else the system's when built in, else English. */
 export function localLang(want: string, system = Intl.DateTimeFormat().resolvedOptions().locale): string {
@@ -221,15 +223,16 @@ export function sentenceOf(body: string, word: string): string {
   return (at > 0 ? '…' : '') + s.slice(at, at + CONTEXT_CHARS).trim() + (at + CONTEXT_CHARS < s.length ? '…' : '')
 }
 
-/** Queues an answer's unseen candidates with the sentence each came from; the sentence never leaves terms.json. */
-export function enqueue(db: TermsDb, text: string, now: string, skip?: (word: string) => boolean, names?: readonly string[]): TermsDb {
+/** Queues an answer's unseen candidates with the sentence each came from; the sentence never leaves terms.json.
+ * `project` is the session folder's own name, sent with each word so the service shows where it came up. */
+export function enqueue(db: TermsDb, text: string, now: string, skip?: (word: string) => boolean, names?: readonly string[], project?: string): TermsDb {
   const room = MAX_PENDING - db.pending.length
   if (room <= 0) return db
   const body = prose(text)
   const fresh = candidates(text, db, names)
     .filter(word => !skip?.(word))
     .slice(0, room)
-    .map((word): Pending => ({ word, key: normalize(word), context: sentenceOf(body, word), seen: now }))
+    .map((word): Pending => ({ word, key: normalize(word), context: sentenceOf(body, word), seen: now, ...(project ? { p: project } : {}) }))
   return fresh.length ? { ...db, pending: [...db.pending, ...fresh] } : db
 }
 
@@ -469,7 +472,7 @@ function collect($: EngineInterface, text: string): Promise<number> {
     if (mask?.isOff) return 0
     const db = await load($)
     const next = enqueue(db, text, new Date(await $.clock.now()).toISOString(), mask && (w => isSecretLike(w) || mask.keys.has(normalize(w))),
-      mask && (await catalogNames($)))
+      mask && (await catalogNames($)), mask?.project)
     if (next === db) return 0
     await save($, next)
     return next.pending.length - db.pending.length
@@ -578,7 +581,19 @@ export function isSecretLike(word: string): boolean {
   })
 }
 
-/** The session's own names, never sent: the folder path's parts, the git remote's owner and repository, the package name, .termboardignore lines. */
+/**
+ * The name the service shows as a term's project: the session folder's own name, never the path above it.
+ * None for the home folder or a folder above it, whose name is the person's, not a project's.
+ */
+export function projectName(cwd: string, home: string): string | undefined {
+  const parts = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const c = parts(cwd), h = parts(home)
+  if (!c || h === c || h.startsWith(c + '/')) return undefined
+  const name = cwd.split(/[\\/]/).filter(Boolean).pop()?.trim().slice(0, 100)
+  return name && !/^[a-z]:$/i.test(name) && !isSecretLike(name) && !PERSONAL.test(name) ? name : undefined
+}
+
+/** The session's own names, never sent as words: the folder path's parts, the git remote's owner and repository, the package name, .termboardignore lines. */
 export function maskKeys(cwd: string, gitConfig: string, packageJson: string, pyproject: string, ignore: string): { keys: Set<string>; isOff: boolean } {
   const names = cwd.split(/[\\/]/)
   for (const m of gitConfig.matchAll(/url\s*=\s*(\S+)/g)) names.push(...m[1]!.replace(/\.git$/, '').split(/[/:@]/).slice(-2))
@@ -592,12 +607,16 @@ export function maskKeys(cwd: string, gitConfig: string, packageJson: string, py
   return { keys: new Set([...names, ...lines].map(normalize).filter(k => k.length >= 2)), isOff: lines.includes('*') }
 }
 
-let maskCache: Promise<{ keys: Set<string>; isOff: boolean }> | undefined
+let maskCache: Promise<{ keys: Set<string>; isOff: boolean; project?: string }> | undefined
 function masks($: EngineInterface) {
   return (maskCache ??= (async () => {
     const cwd = await $.session.cwd()
     const file = (name: string) => $.fs.read(`${cwd}/${name}`).catch(() => '')
-    return maskKeys(cwd, await file('.git/config'), await file('package.json'), await file('pyproject.toml'), await file('.termboardignore'))
+    const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? ''
+    return {
+      ...maskKeys(cwd, await file('.git/config'), await file('package.json'), await file('pyproject.toml'), await file('.termboardignore')),
+      project: sendProject ? projectName(cwd, home) : undefined,
+    }
   })())
 }
 
@@ -815,7 +834,7 @@ async function flush($: EngineInterface, isForced = false): Promise<void> {
     })
   let r: Reply | undefined
   try {
-    r = await authed($, 'POST', '/ingest', { at: new Date().toISOString(), lang, items: batch.map(p => ({ t: p.word, n: 1 })) }, { 'Idempotency-Key': await batchKey(batch) })
+    r = await authed($, 'POST', '/ingest', { at: new Date().toISOString(), lang, items: batch.map(p => ({ t: p.word, n: 1, s: p.seen, ...(p.p ? { p: p.p } : {}) })) }, { 'Idempotency-Key': await batchKey(batch) })
   } catch (err) {
     await hold()
     retryAt = Date.now() + Math.min(MAX_RETRY_MS, 1000 * 2 ** fails++)
@@ -1113,6 +1132,7 @@ function revive($: EngineInterface) {
 
 export const register: Register = (on, options) => {
   if (typeof options?.language === 'string') wantLang = options.language
+  sendProject = options?.project !== 'off'
   useLocal()
   on('session.start', async ($, e, next) => {
     await $.command.register({
